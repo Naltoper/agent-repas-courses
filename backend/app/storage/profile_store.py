@@ -13,10 +13,7 @@ PROFILE_FILENAME = "profile.json"
 
 def _data_dir() -> Path:
     settings = get_settings()
-    path = Path(settings.data_dir)
-    if not path.is_absolute():
-        # Resolve relative to process CWD (expected: backend/)
-        path = Path.cwd() / path
+    path = settings.resolved_data_dir
     path.mkdir(parents=True, exist_ok=True)
     return path
 

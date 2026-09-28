@@ -1,28 +1,45 @@
 """SmartChef Agent — FastAPI application entrypoint."""
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import router
-from app.core.config import get_settings
+from app.core.config import reload_settings
 
-settings = get_settings()
 
-app = FastAPI(
-    title="SmartChef Agent API",
-    description="Backend de planification alimentaire et gestion de courses intelligente.",
-    version="0.1.0",
-)
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    settings = reload_settings()
+    print(
+        f"[smartchef] env={settings.app_env} "
+        f"gemini={'ready' if settings.has_gemini else 'missing'} "
+        f"model={settings.gemini_model}"
+    )
+    yield
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.cors_origins_list,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
-app.include_router(router)
+def create_app() -> FastAPI:
+    settings = reload_settings()
+    application = FastAPI(
+        title="SmartChef Agent API",
+        description="Backend de planification alimentaire et gestion de courses intelligente.",
+        version="0.1.0",
+        lifespan=lifespan,
+    )
+    application.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origins_list,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    application.include_router(router)
+    return application
+
+
+app = create_app()
 
 
 @app.get("/")

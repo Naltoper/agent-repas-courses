@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import time
 import uuid
 from typing import Any
 
 from google import genai
+from google.genai import errors as genai_errors
 from google.genai import types
 
 from app.agent import tools as agent_tools
@@ -34,6 +36,49 @@ Règles :
 - Respecte strictement les régimes et notes.
 - Réponds en français dans les titres, étapes et notes.
 """
+
+
+def _is_transient(exc: Exception) -> bool:
+    text = str(exc)
+    return any(
+        code in text
+        for code in ("429", "503", "RESOURCE_EXHAUSTED", "UNAVAILABLE")
+    )
+
+
+def _generate_with_retry(
+    client: genai.Client,
+    *,
+    model: str,
+    contents: list[types.Content],
+    config: types.GenerateContentConfig,
+    run_id: str,
+    attempts: int = 3,
+):
+    last_exc: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            return client.models.generate_content(
+                model=model,
+                contents=contents,
+                config=config,
+            )
+        except genai_errors.ClientError as exc:
+            last_exc = exc
+            if not _is_transient(exc) or attempt == attempts:
+                raise
+            wait_s = min(20, 4 * attempt)
+            run_store.append_log(
+                run_id,
+                (
+                    f"Gemini temporairement indisponible ({exc.code}) — "
+                    f"nouvel essai dans {wait_s}s ({attempt}/{attempts})"
+                ),
+                level="warn",
+            )
+            time.sleep(wait_s)
+    assert last_exc is not None
+    raise last_exc
 
 
 def start_run(prompt: str) -> AgentSession:
@@ -78,7 +123,7 @@ def execute_run(run_id: str) -> None:
     run_store.update_run(run_id, status="running", profile=profile)
     run_store.append_log(run_id, f"Démarrage agent (modèle {settings.gemini_model})")
 
-    client = genai.Client(api_key=settings.gemini_api_key)
+    client = genai.Client(api_key=settings.gemini_api_key.strip())
     contents: list[types.Content] = [
         types.Content(
             role="user",
@@ -103,10 +148,12 @@ def execute_run(run_id: str) -> None:
                 run_id,
                 f"Appel Gemini — tour {round_idx}/{max_rounds}",
             )
-            response = client.models.generate_content(
+            response = _generate_with_retry(
+                client,
                 model=settings.gemini_model,
                 contents=contents,
                 config=config,
+                run_id=run_id,
             )
 
             candidate = (response.candidates or [None])[0]
@@ -142,7 +189,6 @@ def execute_run(run_id: str) -> None:
                     "Aucun appel d’outil — le modèle n’a pas encore enregistré de menu",
                     level="warn",
                 )
-                # Nudge one more time if budget remains
                 if round_idx < max_rounds:
                     contents.append(
                         types.Content(
@@ -195,7 +241,7 @@ def execute_run(run_id: str) -> None:
                             tool=name,
                             level="error",
                         )
-                except Exception as exc:  # noqa: BLE001 — surface tool errors to model
+                except Exception as exc:  # noqa: BLE001
                     tool_result = {"ok": False, "error": str(exc)}
                     run_store.append_log(
                         run_id,
@@ -216,7 +262,6 @@ def execute_run(run_id: str) -> None:
             )
 
             if menu is not None:
-                # One short closing turn optional — stop to save tokens
                 break
 
         if menu is None:
@@ -239,7 +284,11 @@ def execute_run(run_id: str) -> None:
                 summary=summary,
                 error=None,
             )
-            run_store.append_log(run_id, "Exécution terminée avec succès", level="success")
+            run_store.append_log(
+                run_id,
+                "Exécution terminée avec succès",
+                level="success",
+            )
 
     except Exception as exc:  # noqa: BLE001
         run_store.update_run(

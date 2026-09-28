@@ -19,9 +19,7 @@ SESSION_FILENAME = "latest_session.json"
 
 def _data_dir() -> Path:
     settings = get_settings()
-    path = Path(settings.data_dir)
-    if not path.is_absolute():
-        path = Path.cwd() / path
+    path = settings.resolved_data_dir
     path.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -48,7 +46,6 @@ def get_latest() -> AgentSession | None:
     with _lock:
         if _latest_id and _latest_id in _runs:
             return _runs[_latest_id].model_copy(deep=True)
-    # Fallback to disk
     path = _data_dir() / SESSION_FILENAME
     if not path.exists():
         return None
