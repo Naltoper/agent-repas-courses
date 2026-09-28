@@ -12,19 +12,27 @@ import {
   agentRunStreamUrl,
   fetchAgentRun,
   fetchLatestSession,
+  loadHistorySession,
+  patchShoppingCheck,
+  resetShoppingChecks,
+  resetWorkspace,
   sendAgentFollowUp,
   startAgentRun,
+  validateMenuSession,
 } from '../api/client'
 import type {
   AgentLogEvent,
   AgentSession,
   AppSection,
   ChatMessage,
+  ResultsSubView,
 } from '../types/domain'
 
 interface AgentWorkspaceValue {
   section: AppSection
   setSection: (section: AppSection) => void
+  resultsView: ResultsSubView
+  setResultsView: (view: ResultsSubView) => void
   prompt: string
   setPrompt: (value: string) => void
   session: AgentSession | null
@@ -36,8 +44,12 @@ interface AgentWorkspaceValue {
   restoring: boolean
   startRun: (prompt: string) => Promise<void>
   sendFollowUp: (message: string) => Promise<void>
-  validateMenu: () => void
+  validateMenu: () => Promise<void>
   editMenu: () => void
+  toggleShoppingItem: (itemId: string, checked: boolean) => Promise<void>
+  resetChecks: () => Promise<void>
+  startFresh: () => Promise<void>
+  resumeSession: (runId: string) => Promise<void>
   clearError: () => void
 }
 
@@ -45,6 +57,7 @@ const AgentWorkspaceContext = createContext<AgentWorkspaceValue | null>(null)
 
 export function AgentWorkspaceProvider({ children }: { children: ReactNode }) {
   const [section, setSection] = useState<AppSection>('agent')
+  const [resultsView, setResultsView] = useState<ResultsSubView>('estimation')
   const [prompt, setPrompt] = useState(
     'Menu équilibré, plats simples et rapides le soir.',
   )
@@ -62,6 +75,9 @@ export function AgentWorkspaceProvider({ children }: { children: ReactNode }) {
     setLogs(next.logs ?? [])
     setMessages(next.messages ?? [])
     if (next.prompt) setPrompt(next.prompt)
+    if (typeof next.menu_validated === 'boolean') {
+      setMenuValidated(next.menu_validated)
+    }
     if (next.status === 'completed' || next.status === 'failed') {
       setRunning(false)
     }
@@ -154,10 +170,7 @@ export function AgentWorkspaceProvider({ children }: { children: ReactNode }) {
     const controller = new AbortController()
     fetchLatestSession(controller.signal)
       .then((latest) => {
-        if (latest) {
-          applySession(latest)
-          if (latest.result) setMenuValidated(false)
-        }
+        if (latest) applySession(latest)
       })
       .catch(() => undefined)
       .finally(() => setRestoring(false))
@@ -181,6 +194,7 @@ export function AgentWorkspaceProvider({ children }: { children: ReactNode }) {
       setMessages([])
       setSession(null)
       setMenuValidated(false)
+      setResultsView('estimation')
       try {
         const started = await startAgentRun(trimmed)
         applySession(started)
@@ -214,21 +228,111 @@ export function AgentWorkspaceProvider({ children }: { children: ReactNode }) {
     [session?.id, watchRun],
   )
 
-  const validateMenu = useCallback(() => {
-    if (!session?.result) return
-    setMenuValidated(true)
-    setSection('results')
-  }, [session?.result])
+  const validateMenu = useCallback(async () => {
+    if (!session?.id || !session.result) return
+    setError(null)
+    try {
+      const updated = await validateMenuSession(session.id)
+      applySession(updated)
+      setMenuValidated(true)
+      setResultsView('estimation')
+      setSection('results')
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Validation impossible')
+    }
+  }, [applySession, session?.id, session?.result])
 
   const editMenu = useCallback(() => {
     setMenuValidated(false)
     setSection('agent')
   }, [])
 
+  const toggleShoppingItem = useCallback(
+    async (itemId: string, checked: boolean) => {
+      if (!session?.id || !session.result) return
+      // Optimistic UI
+      setSession((prev) => {
+        if (!prev?.result) return prev
+        const shopping_list = prev.result.shopping_list.map((item) =>
+          item.id === itemId ? { ...item, checked } : item,
+        )
+        return {
+          ...prev,
+          result: { ...prev.result, shopping_list },
+        }
+      })
+      try {
+        const updated = await patchShoppingCheck(session.id, itemId, checked)
+        applySession(updated)
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : 'Mise à jour impossible')
+        try {
+          const fresh = await fetchAgentRun(session.id)
+          applySession(fresh)
+        } catch {
+          // ignore
+        }
+      }
+    },
+    [applySession, session?.id, session?.result],
+  )
+
+  const resetChecks = useCallback(async () => {
+    if (!session?.id) return
+    try {
+      const updated = await resetShoppingChecks(session.id)
+      applySession(updated)
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Réinitialisation impossible')
+    }
+  }, [applySession, session?.id])
+
+  const startFresh = useCallback(async () => {
+    esRef.current?.close()
+    try {
+      await resetWorkspace()
+    } catch {
+      // still clear locally
+    }
+    setSession(null)
+    setLogs([])
+    setMessages([])
+    setMenuValidated(false)
+    setRunning(false)
+    setError(null)
+    setResultsView('estimation')
+    setSection('agent')
+    setPrompt('Menu équilibré, plats simples et rapides le soir.')
+  }, [])
+
+  const resumeSession = useCallback(
+    async (runId: string) => {
+      setError(null)
+      setRestoring(true)
+      try {
+        const loaded = await loadHistorySession(runId)
+        applySession(loaded)
+        setResultsView('estimation')
+        if (loaded.menu_validated && loaded.result) {
+          setSection('results')
+        } else {
+          setSection('agent')
+        }
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : 'Reprise impossible')
+      } finally {
+        setRestoring(false)
+      }
+    },
+    [applySession],
+  )
+
   const value = useMemo<AgentWorkspaceValue>(
     () => ({
       section,
       setSection,
+      resultsView,
+      setResultsView,
       prompt,
       setPrompt,
       session,
@@ -242,10 +346,15 @@ export function AgentWorkspaceProvider({ children }: { children: ReactNode }) {
       sendFollowUp,
       validateMenu,
       editMenu,
+      toggleShoppingItem,
+      resetChecks,
+      startFresh,
+      resumeSession,
       clearError: () => setError(null),
     }),
     [
       section,
+      resultsView,
       prompt,
       session,
       logs,
@@ -258,6 +367,10 @@ export function AgentWorkspaceProvider({ children }: { children: ReactNode }) {
       sendFollowUp,
       validateMenu,
       editMenu,
+      toggleShoppingItem,
+      resetChecks,
+      startFresh,
+      resumeSession,
     ],
   )
 

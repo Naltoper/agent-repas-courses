@@ -1,7 +1,9 @@
 import type { MenuPlan, Recipe } from '../types/domain'
 
 export function formatPrepTime(minutes: number | null | undefined): string {
-  if (minutes == null || minutes <= 0) return 'Préparation : non estimée'
+  if (minutes == null || Number.isNaN(minutes) || minutes <= 0) {
+    return 'Préparation : ~20 min'
+  }
   return `Préparation : ${minutes} min`
 }
 
@@ -132,12 +134,14 @@ export function ShoppingByAisle({ menu }: { menu: MenuPlan }) {
             {aisle}
           </p>
           <ul className="rounded-lg bg-white/70 text-sm ring-1 ring-sage-100">
-            {items.map((item, idx) => (
+            {items.map((item) => (
               <li
-                key={`${aisle}-${item.name}-${idx}`}
-                className="flex items-center justify-between gap-2 border-b border-sage-50 px-3 py-1.5 last:border-0"
+                key={item.id || `${aisle}-${item.name}`}
+                className={`flex items-center justify-between gap-2 border-b border-sage-50 px-3 py-1.5 last:border-0 ${
+                  item.checked ? 'opacity-50' : ''
+                }`}
               >
-                <span>
+                <span className={item.checked ? 'line-through' : ''}>
                   {item.name}{' '}
                   <span className="text-muted">× {item.quantity}</span>
                 </span>

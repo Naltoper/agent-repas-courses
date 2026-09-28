@@ -51,7 +51,12 @@ GENERATE_MENU_DECLARATION = types.FunctionDeclaration(
                         "servings": {"type": "integer"},
                         "prep_time_minutes": {
                             "type": "integer",
-                            "description": "Temps de préparation estimé en minutes",
+                            "description": (
+                                "Temps de préparation réaliste en minutes "
+                                "(ex. 15, 25, 40 — obligatoire)"
+                            ),
+                            "minimum": 5,
+                            "maximum": 180,
                         },
                         "steps": {"type": "array", "items": {"type": "string"}},
                         "ingredients": {
@@ -145,6 +150,9 @@ def execute_generate_menu(
         recipe = Recipe.model_validate(item)
         if recipe.servings <= 0:
             recipe.servings = profile.household_size
+        if recipe.prep_time_minutes <= 0:
+            estimate = max(10, min(90, len(recipe.steps) * 4 or 20))
+            recipe = recipe.model_copy(update={"prep_time_minutes": estimate})
         recipes.append(recipe)
 
     if not days:
@@ -172,6 +180,32 @@ def execute_generate_menu(
     }
 
 
+def _merge_checked_state(
+    items: list[ShoppingItem],
+    previous: list[ShoppingItem],
+) -> list[ShoppingItem]:
+    """Preserve checked flags / ids when regenerating a shopping list."""
+    by_name = {item.name.strip().lower(): item for item in previous}
+    merged: list[ShoppingItem] = []
+    for item in items:
+        prior = by_name.get(item.name.strip().lower())
+        if prior is None:
+            merged.append(item)
+            continue
+        merged.append(
+            item.model_copy(
+                update={
+                    "id": prior.id,
+                    "checked": prior.checked,
+                    "estimated_price_eur": item.estimated_price_eur
+                    if item.estimated_price_eur is not None
+                    else prior.estimated_price_eur,
+                }
+            )
+        )
+    return merged
+
+
 def execute_build_shopping_list(
     args: dict[str, Any],
     *,
@@ -183,6 +217,7 @@ def execute_build_shopping_list(
         raise ValueError("La liste de courses ne peut pas être vide")
 
     items = [ShoppingItem.model_validate(item) for item in raw_items]
+    items = _merge_checked_state(items, menu.shopping_list)
     priced, budget = price_shopping_list(items, profile)
     updated = menu.model_copy(update={"shopping_list": priced, "budget": budget})
     return updated, {

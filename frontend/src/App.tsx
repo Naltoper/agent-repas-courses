@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { fetchHealth } from './api/client'
 import { AgentConsole } from './components/AgentConsole'
 import { EstimationView } from './components/EstimationView'
+import { HistoryView } from './components/HistoryView'
 import { ProfileForm } from './components/ProfileForm'
 import {
   AgentWorkspaceProvider,
@@ -35,7 +36,8 @@ function IntegrationPill({ label, ready }: { label: string; ready: boolean }) {
 
 function AppShell() {
   const [state, setState] = useState<LoadState>({ status: 'loading' })
-  const { section, setSection, menuValidated, session } = useAgentWorkspace()
+  const { section, setSection, menuValidated, session, startFresh } =
+    useAgentWorkspace()
 
   useEffect(() => {
     const controller = new AbortController()
@@ -70,21 +72,33 @@ function AppShell() {
   return (
     <div className="mx-auto flex min-h-svh max-w-3xl flex-col px-5 py-10 sm:px-8">
       <header className="mb-8">
-        <p className="mb-2 text-sm font-medium tracking-wide text-sage-600 uppercase">
-          SmartChef Agent
-        </p>
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <p className="text-sm font-medium tracking-wide text-sage-600 uppercase">
+            SmartChef Agent
+          </p>
+          {session?.result ? (
+            <button
+              type="button"
+              onClick={() => void startFresh()}
+              className="text-xs font-medium text-muted underline-offset-2 hover:text-sage-800 hover:underline"
+            >
+              Nouvelle liste
+            </button>
+          ) : null}
+        </div>
         <h1 className="font-display text-4xl leading-tight text-sage-800 sm:text-5xl">
           Planifier. Cuisiner. Courses.
         </h1>
         <p className="mt-3 max-w-xl text-muted">
-          Peaufinez votre menu avec l’agent, validez-le, puis consultez budget et
-          courses — sans perdre l’état en changeant d’onglet.
+          Peaufinez votre menu avec l’agent, validez-le, puis cochez vos courses —
+          l’historique conserve chaque session.
         </p>
       </header>
 
       <nav className="mb-6 flex flex-wrap gap-3" aria-label="Navigation modules">
         {navBtn('agent', 'Console')}
         {navBtn('results', 'Estimation')}
+        {navBtn('history', 'Historique')}
         {navBtn('profile', 'Profil')}
         {navBtn('status', 'Statut')}
       </nav>
@@ -117,6 +131,18 @@ function AppShell() {
             Estimation et courses
           </h2>
           <EstimationView />
+        </section>
+      )}
+
+      {section === 'history' && (
+        <section
+          aria-labelledby="history-heading"
+          className="rounded-2xl border border-sage-100 bg-white/80 p-5 shadow-sm backdrop-blur-sm"
+        >
+          <h2 id="history-heading" className="sr-only">
+            Historique des sessions
+          </h2>
+          <HistoryView />
         </section>
       )}
 

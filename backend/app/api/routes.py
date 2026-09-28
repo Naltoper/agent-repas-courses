@@ -17,6 +17,9 @@ from app.models.schemas import (
     AgentSession,
     HealthResponse,
     IntegrationStatus,
+    SessionSummary,
+    ShoppingBulkCheckUpdate,
+    ShoppingCheckUpdate,
     UserProfile,
 )
 from app.storage import profile_store, run_store
@@ -63,6 +66,13 @@ async def _execute_follow_up_async(run_id: str, message: str) -> None:
     await asyncio.to_thread(orchestrator.execute_follow_up, run_id, message)
 
 
+def _require_run(run_id: str) -> AgentSession:
+    session = run_store.get_run(run_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Run introuvable")
+    return session
+
+
 @router.post("/agent/run", response_model=AgentSession, status_code=202)
 async def start_agent_run(
     body: AgentRunRequest,
@@ -95,7 +105,7 @@ async def follow_up_agent_run(
             detail="Session sans menu — lancez d'abord une génération réussie",
         )
 
-    run_store.update_run(run_id, status="running", error=None)
+    run_store.update_run(run_id, status="running", error=None, menu_validated=False)
     background_tasks.add_task(_execute_follow_up_async, run_id, body.message)
     refreshed = run_store.get_run(run_id)
     if refreshed is None:
@@ -105,10 +115,7 @@ async def follow_up_agent_run(
 
 @router.get("/agent/runs/{run_id}", response_model=AgentSession)
 def get_agent_run(run_id: str) -> AgentSession:
-    session = run_store.get_run(run_id)
-    if session is None:
-        raise HTTPException(status_code=404, detail="Run introuvable")
-    return session
+    return _require_run(run_id)
 
 
 @router.get("/agent/sessions/latest", response_model=AgentSession)
@@ -117,6 +124,78 @@ def get_latest_session() -> AgentSession:
     if session is None:
         raise HTTPException(status_code=404, detail="Aucune session disponible")
     return session
+
+
+@router.get("/agent/sessions", response_model=list[SessionSummary])
+def list_sessions() -> list[SessionSummary]:
+    latest = run_store.get_latest()
+    if latest is not None:
+        run_store.persist_latest(latest)
+    return run_store.list_summaries()
+
+
+@router.post("/agent/sessions/{run_id}/load", response_model=AgentSession)
+def load_session(run_id: str) -> AgentSession:
+    session = _require_run(run_id)
+    loaded = run_store.load_into_memory(session)
+    run_store.persist_latest(loaded)
+    return loaded
+
+
+@router.post("/agent/runs/{run_id}/validate", response_model=AgentSession)
+def validate_menu(run_id: str) -> AgentSession:
+    session = _require_run(run_id)
+    if session.result is None:
+        raise HTTPException(status_code=400, detail="Aucun menu à valider")
+    updated = run_store.update_run(run_id, menu_validated=True)
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Run introuvable")
+    run_store.persist_latest(updated)
+    return updated
+
+
+@router.patch("/agent/runs/{run_id}/shopping/check", response_model=AgentSession)
+def patch_shopping_check(run_id: str, body: ShoppingCheckUpdate) -> AgentSession:
+    updated = run_store.set_shopping_checks(run_id, {body.item_id: body.checked})
+    if updated is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Run ou liste de courses introuvable",
+        )
+    return updated
+
+
+@router.patch("/agent/runs/{run_id}/shopping/checks", response_model=AgentSession)
+def patch_shopping_checks_bulk(
+    run_id: str,
+    body: ShoppingBulkCheckUpdate,
+) -> AgentSession:
+    updates = {item.item_id: item.checked for item in body.items}
+    updated = run_store.set_shopping_checks(run_id, updates)
+    if updated is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Run ou liste de courses introuvable",
+        )
+    return updated
+
+
+@router.post("/agent/runs/{run_id}/shopping/reset", response_model=AgentSession)
+def reset_shopping_checks(run_id: str) -> AgentSession:
+    updated = run_store.reset_shopping_checks(run_id)
+    if updated is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Run ou liste de courses introuvable",
+        )
+    return updated
+
+
+@router.post("/agent/workspace/reset", response_model=dict)
+def reset_workspace() -> dict:
+    """Clear current workspace so the UI can start a fresh list (history kept)."""
+    run_store.clear_workspace()
+    return {"ok": True, "message": "Espace de travail réinitialisé"}
 
 
 @router.get("/agent/runs/{run_id}/stream")

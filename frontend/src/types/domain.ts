@@ -10,7 +10,9 @@ export type DietaryRegime =
 
 export type ModelSelectionMode = 'manual' | 'auto'
 
-export type AppSection = 'agent' | 'results' | 'profile' | 'status'
+export type AppSection = 'agent' | 'results' | 'history' | 'profile' | 'status'
+
+export type ResultsSubView = 'estimation' | 'shopping'
 
 export interface IntegrationStatus {
   gemini: boolean
@@ -67,10 +69,12 @@ export interface Recipe {
 }
 
 export interface ShoppingItem {
+  id: string
   name: string
   quantity: string
   aisle: string
   estimated_price_eur: number | null
+  checked: boolean
 }
 
 export interface BudgetReport {
@@ -102,10 +106,24 @@ export interface ChatMessage {
   timestamp: string | null
 }
 
+export interface SessionSummary {
+  id: string
+  prompt: string
+  status: string
+  title: string
+  updated_at: string | null
+  days_count: number
+  shopping_count: number
+  checked_count: number
+  estimated_total_eur: number | null
+}
+
 export interface AgentSession {
   id: string
   status: 'pending' | 'running' | 'completed' | 'failed' | string
   prompt: string
+  title?: string
+  updated_at?: string | null
   profile: UserProfile | null
   result: MenuPlan | null
   keep: unknown
@@ -113,4 +131,5 @@ export interface AgentSession {
   messages: ChatMessage[]
   error: string | null
   summary: string | null
+  menu_validated?: boolean
 }

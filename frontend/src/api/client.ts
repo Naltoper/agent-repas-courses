@@ -2,6 +2,7 @@ import type {
   AgentSession,
   GeminiModelsResponse,
   HealthResponse,
+  SessionSummary,
   UserProfile,
 } from '../types/domain'
 
@@ -91,6 +92,60 @@ export async function fetchLatestSession(
   if (response.status === 404) return null
   if (!response.ok) throw new Error(await parseError(response))
   return response.json() as Promise<AgentSession>
+}
+
+export async function fetchSessionHistory(
+  signal?: AbortSignal,
+): Promise<SessionSummary[]> {
+  const response = await fetch(`${API_BASE}/agent/sessions`, { signal })
+  if (!response.ok) throw new Error(await parseError(response))
+  return response.json() as Promise<SessionSummary[]>
+}
+
+export async function loadHistorySession(runId: string): Promise<AgentSession> {
+  const response = await fetch(`${API_BASE}/agent/sessions/${runId}/load`, {
+    method: 'POST',
+  })
+  if (!response.ok) throw new Error(await parseError(response))
+  return response.json() as Promise<AgentSession>
+}
+
+export async function validateMenuSession(runId: string): Promise<AgentSession> {
+  const response = await fetch(`${API_BASE}/agent/runs/${runId}/validate`, {
+    method: 'POST',
+  })
+  if (!response.ok) throw new Error(await parseError(response))
+  return response.json() as Promise<AgentSession>
+}
+
+export async function patchShoppingCheck(
+  runId: string,
+  itemId: string,
+  checked: boolean,
+): Promise<AgentSession> {
+  const response = await fetch(`${API_BASE}/agent/runs/${runId}/shopping/check`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ item_id: itemId, checked }),
+  })
+  if (!response.ok) throw new Error(await parseError(response))
+  return response.json() as Promise<AgentSession>
+}
+
+export async function resetShoppingChecks(runId: string): Promise<AgentSession> {
+  const response = await fetch(
+    `${API_BASE}/agent/runs/${runId}/shopping/reset`,
+    { method: 'POST' },
+  )
+  if (!response.ok) throw new Error(await parseError(response))
+  return response.json() as Promise<AgentSession>
+}
+
+export async function resetWorkspace(): Promise<void> {
+  const response = await fetch(`${API_BASE}/agent/workspace/reset`, {
+    method: 'POST',
+  })
+  if (!response.ok) throw new Error(await parseError(response))
 }
 
 export function agentRunStreamUrl(runId: string): string {

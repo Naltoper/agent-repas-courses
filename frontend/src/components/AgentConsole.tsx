@@ -197,7 +197,7 @@ export function AgentConsole() {
           <button
             type="button"
             disabled={!canValidate}
-            onClick={validateMenu}
+            onClick={() => void validateMenu()}
             className="w-full rounded-lg bg-citrus px-4 py-3 text-sm font-semibold text-sage-800 transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
           >
             Valider ce menu

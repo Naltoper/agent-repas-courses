@@ -11,6 +11,7 @@ backend/**/*.py[cod]
 backend/.pytest_cache/
 backend/data/*.db
 backend/data/*.json
+backend/data/sessions/
 
 # Node
 frontend/node_modules/

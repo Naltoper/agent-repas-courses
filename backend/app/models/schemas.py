@@ -2,8 +2,9 @@
 
 from enum import Enum
 from typing import Literal
+from uuid import uuid4
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class DietaryRegime(str, Enum):
@@ -75,10 +76,27 @@ class UserProfile(BaseModel):
 
 
 class ShoppingItem(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid4()))
     name: str
     quantity: str = "1"
     aisle: str = "Divers"
     estimated_price_eur: float | None = None
+    checked: bool = False
+
+    @model_validator(mode="before")
+    @classmethod
+    def ensure_stable_id(cls, data: object) -> object:
+        if not isinstance(data, dict):
+            return data
+        payload = dict(data)
+        raw_id = str(payload.get("id") or "").strip()
+        if not raw_id:
+            name = str(payload.get("name") or "item").strip().lower()
+            aisle = str(payload.get("aisle") or "divers").strip().lower()
+            payload["id"] = f"{aisle}::{name}"
+        if "checked" in payload and isinstance(payload["checked"], str):
+            payload["checked"] = payload["checked"].lower() in {"1", "true", "yes"}
+        return payload
 
 
 class BudgetReport(BaseModel):
@@ -94,14 +112,46 @@ class Recipe(BaseModel):
     servings: int = 2
     steps: list[str] = Field(default_factory=list)
     ingredients: list[str] = Field(default_factory=list)
-    prep_time_minutes: int | None = Field(
-        default=None,
+    prep_time_minutes: int = Field(
+        default=20,
         ge=1,
         le=480,
         description="Temps de préparation estimé en minutes",
     )
     youtube_video_id: str | None = None
     youtube_url: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def coerce_prep_time(cls, data: object) -> object:
+        if not isinstance(data, dict):
+            return data
+        payload = dict(data)
+        raw = payload.get("prep_time_minutes")
+        if raw is None:
+            for key in (
+                "prep_time",
+                "preparation_time",
+                "preparation_minutes",
+                "temps_preparation",
+                "temps",
+                "duree",
+                "duration_minutes",
+            ):
+                if payload.get(key) is not None:
+                    raw = payload[key]
+                    break
+        if isinstance(raw, str):
+            digits = "".join(ch for ch in raw if ch.isdigit())
+            raw = int(digits) if digits else None
+        if isinstance(raw, (int, float)) and raw > 0:
+            payload["prep_time_minutes"] = max(1, min(480, int(raw)))
+        elif payload.get("prep_time_minutes") is None:
+            steps = payload.get("steps") or []
+            # Heuristic: ~4 min per step, bounded
+            estimate = max(10, min(90, len(steps) * 4 or 15))
+            payload["prep_time_minutes"] = estimate
+        return payload
 
 
 class DayMeal(BaseModel):
@@ -147,10 +197,33 @@ class AgentFollowUpRequest(BaseModel):
     message: str = Field(..., min_length=2, max_length=2000)
 
 
+class ShoppingCheckUpdate(BaseModel):
+    item_id: str
+    checked: bool
+
+
+class ShoppingBulkCheckUpdate(BaseModel):
+    items: list[ShoppingCheckUpdate] = Field(default_factory=list)
+
+
+class SessionSummary(BaseModel):
+    id: str
+    prompt: str
+    status: str
+    title: str = ""
+    updated_at: str | None = None
+    days_count: int = 0
+    shopping_count: int = 0
+    checked_count: int = 0
+    estimated_total_eur: float | None = None
+
+
 class AgentSession(BaseModel):
     id: str
     status: str = "pending"  # pending | running | completed | failed
     prompt: str
+    title: str = ""
+    updated_at: str | None = None
     profile: UserProfile | None = None
     result: MenuPlan | None = None
     keep: KeepSyncStatus | None = None
@@ -158,3 +231,4 @@ class AgentSession(BaseModel):
     messages: list[ChatMessage] = Field(default_factory=list)
     error: str | None = None
     summary: str | None = None
+    menu_validated: bool = False
