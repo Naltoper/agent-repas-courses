@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     # 3.x series required. flash-lite: reliable on free-tier quotas for agent loops.
     gemini_model: str = "gemini-3.5-flash-lite"
+    # Comma-separated fallback chain used when profile.model_selection_mode == auto
+    gemini_fallback_models: str = (
+        "gemini-3.5-flash-lite,gemini-3.6-flash,gemini-3.1-flash-lite,gemini-3.5-flash"
+    )
     youtube_api_key: str = ""
     google_keep_email: str = ""
     google_keep_master_token: str = ""

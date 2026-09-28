@@ -1,69 +1,69 @@
-# Bilan — SmartChef Agent (hotfix config Gemini + modèle 3.x)
+# Bilan — SmartChef Agent (sélection fine du modèle Gemini)
 
 **Rôle :** Développeur senior  
 **Date :** 2026-09-28  
-**Périmètre :** Correction chargement `GEMINI_API_KEY` / `GEMINI_MODEL` + validation appel réel  
-**Statut :** ✅ Corrigé et validé (menu généré via Function Calling)
+**Périmètre :** `model_selection_mode` / `preferred_model` persistés, API `/models`, fallback auto, UI profil  
+**Statut :** ✅ Livré et vérifié  
+**Commits :** `9ab70eb` (avant) → commit post-travail (après)
 
 ---
 
-## 1. Diagnostic
+## 1. Décisions
 
-| Symptôme | Cause racine |
-|----------|--------------|
-| Clé présente dans `.env` mais `has_gemini=false` / « clé absente » | `env_file=".env"` **relatif au CWD** + `@lru_cache` sur `get_settings()` : si uvicorn démarre ailleurs, ou avant remplissage de la clé, la config reste vide/stale |
-| Erreurs modèle 2.x | Défaut / `.env` encore sur `gemini-2.5-flash` (série 2 dépréciée / hors cible) |
-| `gemini-3.5-flash` → 429 | Quota free tier épuisé (20 req/jour sur ce modèle) — **auth OK**, quota KO |
-
----
-
-## 2. Décisions
-
-1. **Chemin absolu** `backend/.env` via `Path(__file__).parents[2]` + `load_dotenv`.
-2. **`reload_settings()`** au boot (lifespan + `create_app`) pour invalider le cache.
-3. **Modèle défaut `gemini-3.5-flash-lite`** (série 3.x, Function Calling OK, quota free-tier encore dispo). Surcharge possible via `GEMINI_MODEL=gemini-3.5-flash` si quota/billing le permettent.
-4. **Retry léger** 429/503 (3 tentatives) dans l’orchestrateur.
-5. Persistance `data/` ancrée sur `BACKEND_ROOT` (même bug CWD).
+| Sujet | Choix |
+|-------|--------|
+| Persistance | Champs ajoutés à `UserProfile` → `data/profile.json` via ProfileStore |
+| Modes | `manual` = modèle imposé ; `auto` = préféré puis chaîne de secours |
+| Catalogue | Liste figée série **3.x** exposée par `GET /models` (select dynamique UI) |
+| Secours | `GEMINI_FALLBACK_MODELS` (env) + défauts code |
+| Orchestrateur | Recharge le profil **à chaque run** ; logs mode / chaîne / bascules |
+| Erreurs transient | Catch `APIError` (ClientError **et** ServerError 503) puis retry → fallback |
 
 ---
 
-## 3. Fichiers touchés
+## 2. Fichiers touchés
 
-- `backend/app/core/config.py` — chemin absolu, `load_dotenv`, modèle 3.x, `reload_settings`
-- `backend/app/main.py` — `create_app` + lifespan reload
-- `backend/app/agent/orchestrator.py` — retry transient + `api_key.strip()`
-- `backend/app/storage/profile_store.py` / `run_store.py` — `resolved_data_dir`
-- `backend/.env.example` + `backend/.env` (`GEMINI_MODEL` uniquement)
+### Backend
+- `app/models/schemas.py` — `ModelSelectionMode`, champs profil
+- `app/core/gemini_models.py` — **nouveau** catalogue + `resolve_model_chain`
+- `app/core/config.py` — `gemini_fallback_models`
+- `app/agent/orchestrator.py` — stratégie manuel/auto
+- `app/api/routes.py` — `GET /models`
+- `.env.example` — `GEMINI_FALLBACK_MODELS`
+
+### Frontend
+- `src/types/domain.ts`, `src/api/client.ts`
+- `src/components/ProfileForm.tsx` — selects mode + modèle (chargé via `/models`)
+
+### Contexte
 - `.agent_context/last_summary.md`
 
 ---
 
-## 4. Preuves de validation
+## 3. Vérifications
 
-| Test | Résultat |
-|------|----------|
-| Load config depuis CWD `/tmp` | `has_gemini=True`, `key_len=53`, modèle 3.x |
-| `GET /health` | `integrations.gemini: true` |
-| Smoke `generate_content` | Auth OK ; `gemini-3.5-flash` 429 quota ; `gemini-3.5-flash-lite` **OK** |
-| `POST /agent/run` réel | **completed** — `generate_menu` → 3 jours / 3 recettes |
-| SSE `/agent/runs/{id}/stream` | Events `log` puis `done` en direct (console React compatible EventSource) |
-
-Exemple menu obtenu : omelette thon, pâtes thon, poulet/riz (aligné profil protéines / rapide / économique).
+| Check | Résultat |
+|-------|----------|
+| `GET /models` | Catalogue 3.x + fallbacks |
+| `PUT/GET /profile` | `model_selection_mode` + `preferred_model` persistés |
+| Chaîne auto / manuel | Unit OK |
+| Run agent | Profil lu ; retry 503 puis **completed** (`generate_menu`, 2 jours) |
+| `npm run build` | OK |
 
 ---
 
-## 5. Risques restants
+## 4. Risques restants
 
-- Quotas free tier / 503 « high demand » côté Google (retry atténue, ne garantit pas).
-- Relancer **uvicorn** après toute modification de `.env` (ou appeler `reload_settings` — déjà au startup).
-- `gemini-3.5-flash` (non-lite) reste utilisable en changeant `GEMINI_MODEL` si le plan le permet.
-
----
-
-## 6. Prochaine étape proposée
-
-**P3 — Courses & budget** (`build_shopping_list` + `estimate_budget` + indicateur UI), maintenant que la boucle Gemini est opérationnelle.
+- Quotas / 503 Google peuvent épuiser toute la chaîne en mode auto.
+- Catalogue modèles maintenu à la main (pas un live list Models API).
+- Mode manuel n’a pas de filet de secours (comportement voulu).
 
 ---
 
-*Fin du bilan — hotfix Gemini config / modèle 3.x.*
+## 5. Prochaine étape proposée
+
+**P3 — Courses & budget** (`build_shopping_list`, `estimate_budget`, indicateur UI).
+
+---
+
+*Fin du bilan — sélection modèle Gemini.*

@@ -8,6 +8,8 @@ export type DietaryRegime =
   | 'halal'
   | 'other'
 
+export type ModelSelectionMode = 'manual' | 'auto'
+
 export interface IntegrationStatus {
   gemini: boolean
   youtube: boolean
@@ -27,6 +29,21 @@ export interface UserProfile {
   weekly_budget_eur: number
   dietary_regimes: DietaryRegime[]
   notes: string
+  model_selection_mode: ModelSelectionMode
+  preferred_model: string
+}
+
+export interface GeminiModelInfo {
+  id: string
+  label: string
+  description: string
+  recommended: boolean
+}
+
+export interface GeminiModelsResponse {
+  models: GeminiModelInfo[]
+  default_model: string
+  fallback_models: string[]
 }
 
 export interface DayMeal {

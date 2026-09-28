@@ -1,6 +1,11 @@
 import { useEffect, useId, useState, type FormEvent } from 'react'
-import { fetchProfile, saveProfile } from '../api/client'
-import type { DietaryRegime, UserProfile } from '../types/domain'
+import { fetchGeminiModels, fetchProfile, saveProfile } from '../api/client'
+import type {
+  DietaryRegime,
+  GeminiModelInfo,
+  ModelSelectionMode,
+  UserProfile,
+} from '../types/domain'
 
 const REGIME_OPTIONS: { value: DietaryRegime; label: string }[] = [
   { value: 'omnivore', label: 'Omnivore' },
@@ -16,6 +21,8 @@ const EMPTY_PROFILE: UserProfile = {
   weekly_budget_eur: 80,
   dietary_regimes: ['omnivore'],
   notes: '',
+  model_selection_mode: 'auto',
+  preferred_model: 'gemini-3.5-flash-lite',
 }
 
 type SaveFeedback =
@@ -24,9 +31,14 @@ type SaveFeedback =
   | { kind: 'success'; message: string }
   | { kind: 'error'; message: string }
 
+const selectClass =
+  'w-full rounded-lg border border-sage-100 bg-white px-3 py-2 text-ink outline-none ring-sage-600 focus:ring-2'
+
 export function ProfileForm() {
   const formId = useId()
   const [profile, setProfile] = useState<UserProfile>(EMPTY_PROFILE)
+  const [models, setModels] = useState<GeminiModelInfo[]>([])
+  const [fallbackHint, setFallbackHint] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [feedback, setFeedback] = useState<SaveFeedback>({ kind: 'idle' })
@@ -36,9 +48,19 @@ export function ProfileForm() {
     setLoading(true)
     setLoadError(null)
 
-    fetchProfile(controller.signal)
-      .then((data) => {
-        setProfile(data)
+    Promise.all([
+      fetchProfile(controller.signal),
+      fetchGeminiModels(controller.signal),
+    ])
+      .then(([data, catalog]) => {
+        setProfile({
+          ...EMPTY_PROFILE,
+          ...data,
+          preferred_model:
+            data.preferred_model || catalog.default_model || EMPTY_PROFILE.preferred_model,
+        })
+        setModels(catalog.models)
+        setFallbackHint(catalog.fallback_models)
         setLoading(false)
       })
       .catch((err: unknown) => {
@@ -75,7 +97,8 @@ export function ProfileForm() {
       setProfile(saved)
       setFeedback({
         kind: 'success',
-        message: 'Préférences enregistrées. Elles seront reprises au prochain chargement.',
+        message:
+          'Préférences enregistrées (modèle inclus). Elles seront utilisées au prochain run agent.',
       })
     } catch (err: unknown) {
       const message =
@@ -101,6 +124,8 @@ export function ProfileForm() {
     )
   }
 
+  const selectedModel = models.find((m) => m.id === profile.preferred_model)
+
   return (
     <form className="space-y-5" onSubmit={onSubmit} noValidate>
       <div className="grid gap-5 sm:grid-cols-2">
@@ -122,7 +147,7 @@ export function ProfileForm() {
                 household_size: Number(e.target.value) || 1,
               }))
             }}
-            className="w-full rounded-lg border border-sage-100 bg-white px-3 py-2 text-ink outline-none ring-sage-600 focus:ring-2"
+            className={selectClass}
           />
         </label>
 
@@ -144,7 +169,7 @@ export function ProfileForm() {
                 weekly_budget_eur: Number(e.target.value) || 0,
               }))
             }}
-            className="w-full rounded-lg border border-sage-100 bg-white px-3 py-2 text-ink outline-none ring-sage-600 focus:ring-2"
+            className={selectClass}
           />
         </label>
       </div>
@@ -181,6 +206,71 @@ export function ProfileForm() {
         </p>
       </fieldset>
 
+      <fieldset className="space-y-4 rounded-xl bg-sage-50/60 p-4 ring-1 ring-sage-100">
+        <legend className="px-1 text-sm font-semibold text-sage-800">
+          Modèle Gemini
+        </legend>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <label className="block space-y-1.5" htmlFor={`${formId}-mode`}>
+            <span className="text-sm font-medium text-sage-800">
+              Mode de sélection
+            </span>
+            <select
+              id={`${formId}-mode`}
+              value={profile.model_selection_mode}
+              onChange={(e) => {
+                setFeedback({ kind: 'idle' })
+                setProfile((p) => ({
+                  ...p,
+                  model_selection_mode: e.target.value as ModelSelectionMode,
+                }))
+              }}
+              className={selectClass}
+            >
+              <option value="auto">Auto (fallback si quota / indispo)</option>
+              <option value="manual">Manuel (modèle imposé)</option>
+            </select>
+          </label>
+
+          <label className="block space-y-1.5" htmlFor={`${formId}-model`}>
+            <span className="text-sm font-medium text-sage-800">
+              Modèle préféré
+            </span>
+            <select
+              id={`${formId}-model`}
+              value={profile.preferred_model}
+              onChange={(e) => {
+                setFeedback({ kind: 'idle' })
+                setProfile((p) => ({ ...p, preferred_model: e.target.value }))
+              }}
+              className={selectClass}
+            >
+              {models.map((model) => (
+                <option key={model.id} value={model.id}>
+                  {model.label}
+                  {model.recommended ? ' ★' : ''}
+                </option>
+              ))}
+              {!models.some((m) => m.id === profile.preferred_model) && (
+                <option value={profile.preferred_model}>
+                  {profile.preferred_model} (persiste)
+                </option>
+              )}
+            </select>
+          </label>
+        </div>
+
+        {selectedModel?.description && (
+          <p className="text-xs text-muted">{selectedModel.description}</p>
+        )}
+        {profile.model_selection_mode === 'auto' && fallbackHint.length > 0 && (
+          <p className="text-xs text-muted">
+            Secours auto : {fallbackHint.join(' → ')}
+          </p>
+        )}
+      </fieldset>
+
       <label className="block space-y-1.5" htmlFor={`${formId}-notes`}>
         <span className="text-sm font-medium text-sage-800">
           Notes / contraintes (optionnel)
@@ -195,7 +285,7 @@ export function ProfileForm() {
             setProfile((p) => ({ ...p, notes: e.target.value }))
           }}
           placeholder="Ex. allergies, magasin préféré, repas du midi au bureau…"
-          className="w-full resize-y rounded-lg border border-sage-100 bg-white px-3 py-2 text-ink outline-none ring-sage-600 focus:ring-2"
+          className={`${selectClass} resize-y`}
         />
       </label>
 

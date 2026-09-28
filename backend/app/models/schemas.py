@@ -14,6 +14,11 @@ class DietaryRegime(str, Enum):
     OTHER = "other"
 
 
+class ModelSelectionMode(str, Enum):
+    MANUAL = "manual"
+    AUTO = "auto"
+
+
 class IntegrationStatus(BaseModel):
     gemini: bool = False
     youtube: bool = False
@@ -38,6 +43,8 @@ class UserProfile(BaseModel):
         min_length=1,
     )
     notes: str = Field(default="", max_length=500)
+    model_selection_mode: ModelSelectionMode = ModelSelectionMode.AUTO
+    preferred_model: str = Field(default="gemini-3.5-flash-lite", min_length=1, max_length=80)
 
     @field_validator("dietary_regimes")
     @classmethod
@@ -52,6 +59,14 @@ class UserProfile(BaseModel):
         if not unique:
             raise ValueError("Au moins un régime alimentaire est requis")
         return unique
+
+    @field_validator("preferred_model")
+    @classmethod
+    def strip_preferred_model(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("preferred_model ne peut pas être vide")
+        return cleaned
 
 
 class ShoppingItem(BaseModel):

@@ -1,4 +1,9 @@
-import type { AgentSession, HealthResponse, UserProfile } from '../types/domain'
+import type {
+  AgentSession,
+  GeminiModelsResponse,
+  HealthResponse,
+  UserProfile,
+} from '../types/domain'
 
 const API_BASE = import.meta.env.VITE_API_URL?.replace(/\/$/, '') ?? '/api'
 
@@ -49,6 +54,16 @@ export async function saveProfile(profile: UserProfile): Promise<UserProfile> {
   return response.json() as Promise<UserProfile>
 }
 
+export async function fetchGeminiModels(
+  signal?: AbortSignal,
+): Promise<GeminiModelsResponse> {
+  const response = await fetch(`${API_BASE}/models`, { signal })
+  if (!response.ok) {
+    throw new Error(await parseError(response))
+  }
+  return response.json() as Promise<GeminiModelsResponse>
+}
+
 export async function startAgentRun(prompt: string): Promise<AgentSession> {
   const response = await fetch(`${API_BASE}/agent/run`, {
     method: 'POST',
@@ -72,7 +87,6 @@ export async function fetchAgentRun(
   return response.json() as Promise<AgentSession>
 }
 
-/** Absolute or proxied URL for EventSource (must be same-origin or CORS-friendly). */
 export function agentRunStreamUrl(runId: string): string {
   return `${API_BASE}/agent/runs/${runId}/stream`
 }

@@ -10,6 +10,7 @@ from fastapi.responses import StreamingResponse
 
 from app.agent import orchestrator
 from app.core.config import get_settings
+from app.core.gemini_models import GeminiModelsResponse, list_models_response
 from app.models.schemas import (
     AgentRunRequest,
     AgentSession,
@@ -49,6 +50,12 @@ def get_profile() -> UserProfile:
 def put_profile(profile: UserProfile) -> UserProfile:
     """Validate and persist the user profile to data/profile.json."""
     return profile_store.save_profile(profile)
+
+
+@router.get("/models", response_model=GeminiModelsResponse)
+def list_gemini_models() -> GeminiModelsResponse:
+    """List Gemini 3.x models available for profile selection + fallback chain."""
+    return list_models_response()
 
 
 async def _execute_run_async(run_id: str) -> None:
