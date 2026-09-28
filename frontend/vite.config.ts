@@ -4,16 +4,18 @@ import { defineConfig, loadEnv } from 'vite'
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
-  // Must match the uvicorn port actually running the latest routes.
   const apiProxyTarget =
-    env.VITE_API_PROXY_TARGET?.replace(/\/$/, '') || 'http://127.0.0.1:8000'
+    env.VITE_API_PROXY_TARGET?.trim().replace(/\/$/, '') ||
+    'http://127.0.0.1:8000'
 
   return {
     plugins: [react(), tailwindcss()],
     server: {
+      host: '127.0.0.1',
       port: 5173,
+      strictPort: true,
       proxy: {
-        // Local DX: call /api/* from the Vite origin → FastAPI
+        // Browser calls /api/* → FastAPI on :8000 (strip /api prefix)
         '/api': {
           target: apiProxyTarget,
           changeOrigin: true,

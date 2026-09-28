@@ -6,16 +6,32 @@ import type {
   UserProfile,
 } from '../types/domain'
 
-const API_BASE = import.meta.env.VITE_API_URL?.replace(/\/$/, '') ?? '/api'
+/** Empty VITE_API_URL= must NOT win over the default `/api` proxy prefix. */
+const rawApiUrl = import.meta.env.VITE_API_URL
+export const API_BASE =
+  typeof rawApiUrl === 'string' && rawApiUrl.trim().length > 0
+    ? rawApiUrl.trim().replace(/\/$/, '')
+    : '/api'
 
 async function parseError(response: Response): Promise<string> {
+  const contentType = response.headers.get('content-type') || ''
   try {
-    const body = (await response.json()) as {
-      detail?: string | Array<{ msg?: string }>
-    }
-    if (typeof body.detail === 'string') return body.detail
-    if (Array.isArray(body.detail) && body.detail[0]?.msg) {
-      return body.detail.map((d) => d.msg).join(' · ')
+    if (contentType.includes('application/json')) {
+      const body = (await response.json()) as {
+        detail?: string | Array<{ msg?: string }>
+      }
+      if (typeof body.detail === 'string') return body.detail
+      if (Array.isArray(body.detail) && body.detail[0]?.msg) {
+        return body.detail.map((d) => d.msg).join(' · ')
+      }
+    } else {
+      const text = await response.text()
+      if (/^\s*<!doctype/i.test(text)) {
+        return (
+          'API injoignable (réponse HTML). Vérifiez uvicorn sur :8000 ' +
+          'et que les appels passent par /api (redémarrez Vite).'
+        )
+      }
     }
   } catch {
     // ignore
@@ -23,16 +39,30 @@ async function parseError(response: Response): Promise<string> {
   return `Erreur API (${response.status})`
 }
 
+async function parseJson<T>(response: Response): Promise<T> {
+  const contentType = response.headers.get('content-type') || ''
+  if (!contentType.includes('application/json')) {
+    const text = await response.text()
+    if (/^\s*<!doctype/i.test(text)) {
+      throw new Error(
+        'API injoignable (réponse HTML). Lancez uvicorn sur :8000 et redémarrez Vite.',
+      )
+    }
+    throw new Error(`Réponse API non-JSON (${response.status})`)
+  }
+  return response.json() as Promise<T>
+}
+
 export async function fetchHealth(signal?: AbortSignal): Promise<HealthResponse> {
   const response = await fetch(`${API_BASE}/health`, { signal })
   if (!response.ok) throw new Error(await parseError(response))
-  return response.json() as Promise<HealthResponse>
+  return parseJson<HealthResponse>(response)
 }
 
 export async function fetchProfile(signal?: AbortSignal): Promise<UserProfile> {
   const response = await fetch(`${API_BASE}/profile`, { signal })
   if (!response.ok) throw new Error(await parseError(response))
-  return response.json() as Promise<UserProfile>
+  return parseJson<UserProfile>(response)
 }
 
 export async function saveProfile(profile: UserProfile): Promise<UserProfile> {
@@ -42,7 +72,7 @@ export async function saveProfile(profile: UserProfile): Promise<UserProfile> {
     body: JSON.stringify(profile),
   })
   if (!response.ok) throw new Error(await parseError(response))
-  return response.json() as Promise<UserProfile>
+  return parseJson<UserProfile>(response)
 }
 
 export async function fetchGeminiModels(
@@ -50,7 +80,7 @@ export async function fetchGeminiModels(
 ): Promise<GeminiModelsResponse> {
   const response = await fetch(`${API_BASE}/models`, { signal })
   if (!response.ok) throw new Error(await parseError(response))
-  return response.json() as Promise<GeminiModelsResponse>
+  return parseJson<GeminiModelsResponse>(response)
 }
 
 export async function startAgentRun(prompt: string): Promise<AgentSession> {
@@ -60,7 +90,7 @@ export async function startAgentRun(prompt: string): Promise<AgentSession> {
     body: JSON.stringify({ prompt }),
   })
   if (!response.ok) throw new Error(await parseError(response))
-  return response.json() as Promise<AgentSession>
+  return parseJson<AgentSession>(response)
 }
 
 export async function sendAgentFollowUp(
@@ -73,7 +103,7 @@ export async function sendAgentFollowUp(
     body: JSON.stringify({ message }),
   })
   if (!response.ok) throw new Error(await parseError(response))
-  return response.json() as Promise<AgentSession>
+  return parseJson<AgentSession>(response)
 }
 
 export async function fetchAgentRun(
@@ -82,7 +112,7 @@ export async function fetchAgentRun(
 ): Promise<AgentSession> {
   const response = await fetch(`${API_BASE}/agent/runs/${runId}`, { signal })
   if (!response.ok) throw new Error(await parseError(response))
-  return response.json() as Promise<AgentSession>
+  return parseJson<AgentSession>(response)
 }
 
 export async function fetchLatestSession(
@@ -91,7 +121,7 @@ export async function fetchLatestSession(
   const response = await fetch(`${API_BASE}/agent/sessions/latest`, { signal })
   if (response.status === 404) return null
   if (!response.ok) throw new Error(await parseError(response))
-  return response.json() as Promise<AgentSession>
+  return parseJson<AgentSession>(response)
 }
 
 export async function fetchSessionHistory(
@@ -99,7 +129,7 @@ export async function fetchSessionHistory(
 ): Promise<SessionSummary[]> {
   const response = await fetch(`${API_BASE}/agent/sessions`, { signal })
   if (!response.ok) throw new Error(await parseError(response))
-  return response.json() as Promise<SessionSummary[]>
+  return parseJson<SessionSummary[]>(response)
 }
 
 export async function loadHistorySession(runId: string): Promise<AgentSession> {
@@ -107,7 +137,7 @@ export async function loadHistorySession(runId: string): Promise<AgentSession> {
     method: 'POST',
   })
   if (!response.ok) throw new Error(await parseError(response))
-  return response.json() as Promise<AgentSession>
+  return parseJson<AgentSession>(response)
 }
 
 export async function renameHistorySession(
@@ -120,7 +150,7 @@ export async function renameHistorySession(
     body: JSON.stringify({ title }),
   })
   if (!response.ok) throw new Error(await parseError(response))
-  return response.json() as Promise<AgentSession>
+  return parseJson<AgentSession>(response)
 }
 
 export async function deleteHistorySession(runId: string): Promise<void> {
@@ -131,18 +161,17 @@ export async function deleteHistorySession(runId: string): Promise<void> {
 }
 
 export async function validateMenuSession(runId: string): Promise<AgentSession> {
-  // Primary: explicit run id
-  let response = await fetch(`${API_BASE}/agent/runs/${encodeURIComponent(runId)}/validate`, {
-    method: 'POST',
-  })
-  // Fallback when proxy hits a stale backend (route 404) or id drift after F5
+  let response = await fetch(
+    `${API_BASE}/agent/runs/${encodeURIComponent(runId)}/validate`,
+    { method: 'POST' },
+  )
   if (response.status === 404) {
     response = await fetch(`${API_BASE}/agent/sessions/latest/validate`, {
       method: 'POST',
     })
   }
   if (!response.ok) throw new Error(await parseError(response))
-  return response.json() as Promise<AgentSession>
+  return parseJson<AgentSession>(response)
 }
 
 export async function patchShoppingCheck(
@@ -156,7 +185,7 @@ export async function patchShoppingCheck(
     body: JSON.stringify({ item_id: itemId, checked }),
   })
   if (!response.ok) throw new Error(await parseError(response))
-  return response.json() as Promise<AgentSession>
+  return parseJson<AgentSession>(response)
 }
 
 export async function resetShoppingChecks(runId: string): Promise<AgentSession> {
@@ -165,7 +194,7 @@ export async function resetShoppingChecks(runId: string): Promise<AgentSession> 
     { method: 'POST' },
   )
   if (!response.ok) throw new Error(await parseError(response))
-  return response.json() as Promise<AgentSession>
+  return parseJson<AgentSession>(response)
 }
 
 export async function resetWorkspace(): Promise<void> {

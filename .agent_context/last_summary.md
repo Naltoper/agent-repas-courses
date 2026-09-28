@@ -1,47 +1,67 @@
-# Bilan — SmartChef Agent (fix 404 Valider le menu)
+# Bilan — SmartChef Agent (fix JSON/`<!doctype` + lancement)
 
 **Rôle :** Développeur senior  
 **Date :** 2026-09-29  
-**Périmètre :** Correction du 404 « Not Found » sur Valider le menu — **sans** Keep / YouTube  
-**Statut :** ✅ Livré (`npm run build` OK · `python -m tests.test_api` OK)
+**Périmètre :** API injoignable / profil / historique (`Unexpected token '<'`) — **sans** Keep / YouTube  
+**Statut :** ✅ Corrigé et testé (`npm run build` · `scripts/check_api.sh` · `python -m tests.test_api`)
 
 ---
 
-## 1. Décisions / diagnostic
+## 1. Diagnostic
 
-| Sujet | Choix |
-|-------|--------|
-| Cause racine | Vite proxyait `/api` → **:8000** (processus uvicorn **obsolète**, sans route `/validate`). L’API à jour tournait sur **:8081**. FastAPI répondait `{"detail":"Not Found"}` (route absente), pas « Run introuvable ». |
-| Client | `POST /api/agent/runs/{session.id}/validate` (+ fallback `POST .../sessions/latest/validate`) |
-| Backend | Routes présentes : `/agent/runs/{run_id}/validate` et `/agent/sessions/latest/validate` (+ miroir sous `/api`) |
-| Proxy | `VITE_API_PROXY_TARGET` configurable ; `.env.development` → `:8000` (API relancée à jour) |
-| Persistance F5 | `get_latest()` hydrate la mémoire ; lifespan restaure la dernière session au boot |
+| Symptôme | Cause |
+|----------|--------|
+| `Unexpected token '<', "<!doctype"...` | Le client parsait du **HTML** (SPA Vite) au lieu du JSON API |
+| Cause racine | `VITE_API_URL=` (chaîne **vide**) dans `.env.development` ⇒ `API_BASE=""` ⇒ fetch `/health`, `/profile`… **sans** préfixe `/api` ⇒ Vite renvoie `index.html` |
+| Secondaire | Vite écoutait parfois seulement `[::1]:5173` → accès `127.0.0.1` fragile |
 
 ---
 
-## 2. Fichiers touchés
+## 2. Décisions / correctifs
 
-- `frontend/vite.config.ts` — proxy via `VITE_API_PROXY_TARGET`
-- `frontend/.env.development` / `.env.example` — cible proxy documentée
-- `frontend/src/api/client.ts` — fallback validate `latest`
-- `backend/app/main.py` — hydrate au boot + mount `/api`
-- `backend/app/api/routes.py` — `POST /agent/sessions/latest/validate`
-- `backend/app/storage/run_store.py` — hydrate `get_latest`, globals corrigés
-- `backend/tests/test_api.py` — smoke cold memory + latest + `/api`
+- Traiter `VITE_API_URL` vide comme « non défini » → défaut `/api`
+- Vite : `host: 127.0.0.1`, `strictPort: true`, proxy → `:8000`
+- Messages d’erreur explicites si réponse HTML
+- Script `scripts/check_api.sh` pour valider API directe + proxy
 
 ---
 
-## 3. Risques restants
+## 3. Fichiers touchés
 
-- Un second uvicorn obsolète sur un autre port peut encore 404 si le proxy pointe dessus → **redémarrer Vite** après changement de `.env.development`.
-- Deux mounts (`/` et `/api`) dupliquent les operation_id OpenAPI (sans impact runtime).
-
----
-
-## 4. Prochaine étape proposée
-
-Stabiliser un seul port API (script `make dev` / doc README) pour éviter les dérives 8000 vs 8081, puis P4 YouTube/Keep si besoin.
+- `frontend/src/api/client.ts`
+- `frontend/vite.config.ts`
+- `frontend/.env.development` / `.env.example`
+- `scripts/check_api.sh`
+- `.agent_context/last_summary.md`
 
 ---
 
-*Fin du bilan — 404 validate / proxy.*
+## 4. Lancement correct (ports)
+
+1. **API** → `127.0.0.1:8000`  
+2. **UI** → `127.0.0.1:5173`  
+
+```bash
+# Terminal 1
+cd backend && source .venv/bin/activate
+uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+
+# Terminal 2
+cd frontend && npm run dev
+# → http://127.0.0.1:5173/
+```
+
+Vérif : `./scripts/check_api.sh`
+
+---
+
+## 5. Risques restants
+
+- Oublier de redémarrer Vite après changement d’`.env*`
+- Un second uvicorn sur un autre port si `VITE_API_PROXY_TARGET` n’est pas aligné
+
+---
+
+## 6. Prochaine étape proposée
+
+Script `make dev` unique (tue les ports 8000/5173 puis démarre les deux) pour éviter les conflits.
