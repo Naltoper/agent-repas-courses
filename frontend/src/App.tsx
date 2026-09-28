@@ -1,0 +1,185 @@
+import { useEffect, useState } from 'react'
+import { fetchHealth } from './api/client'
+import { AgentConsole } from './components/AgentConsole'
+import { ProfileForm } from './components/ProfileForm'
+import type { HealthResponse } from './types/domain'
+
+type LoadState =
+  | { status: 'loading' }
+  | { status: 'ok'; data: HealthResponse }
+  | { status: 'error'; message: string }
+
+type Section = 'profile' | 'agent' | 'status'
+
+function IntegrationPill({ label, ready }: { label: string; ready: boolean }) {
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-sm ${
+        ready
+          ? 'bg-sage-100 text-sage-800'
+          : 'bg-white/70 text-muted ring-1 ring-sage-100'
+      }`}
+    >
+      <span
+        className={`size-1.5 rounded-full ${ready ? 'bg-sage-600' : 'bg-citrus'}`}
+        aria-hidden
+      />
+      {label}
+      <span className="text-xs opacity-70">{ready ? 'prêt' : 'à configurer'}</span>
+    </span>
+  )
+}
+
+export default function App() {
+  const [state, setState] = useState<LoadState>({ status: 'loading' })
+  const [section, setSection] = useState<Section>('agent')
+
+  useEffect(() => {
+    const controller = new AbortController()
+
+    fetchHealth(controller.signal)
+      .then((data) => setState({ status: 'ok', data }))
+      .catch((err: unknown) => {
+        if (controller.signal.aborted) return
+        const message =
+          err instanceof Error ? err.message : 'Impossible de joindre l’API'
+        setState({ status: 'error', message })
+      })
+
+    return () => controller.abort()
+  }, [])
+
+  const navBtn = (id: Section, label: string) => (
+    <button
+      type="button"
+      onClick={() => setSection(id)}
+      className={`rounded-md px-3 py-1.5 text-sm transition ${
+        section === id
+          ? 'bg-sage-100 font-medium text-sage-800'
+          : 'bg-white/60 text-muted ring-1 ring-sage-100 hover:ring-sage-600/30'
+      }`}
+    >
+      {label}
+    </button>
+  )
+
+  return (
+    <div className="mx-auto flex min-h-svh max-w-3xl flex-col px-5 py-10 sm:px-8">
+      <header className="mb-8">
+        <p className="mb-2 text-sm font-medium tracking-wide text-sage-600 uppercase">
+          SmartChef Agent
+        </p>
+        <h1 className="font-display text-4xl leading-tight text-sage-800 sm:text-5xl">
+          Planifier. Cuisiner. Courses.
+        </h1>
+        <p className="mt-3 max-w-xl text-muted">
+          Lancez l’agent avec une consigne en langage naturel — le menu s’appuie
+          sur votre profil.
+        </p>
+      </header>
+
+      <nav
+        className="mb-6 flex flex-wrap gap-3"
+        aria-label="Navigation modules"
+      >
+        {navBtn('agent', 'Console agent')}
+        {navBtn('profile', 'Profil')}
+        {navBtn('status', 'Statut')}
+      </nav>
+
+      {section === 'agent' && (
+        <section
+          aria-labelledby="agent-heading"
+          className="rounded-2xl border border-sage-100 bg-white/80 p-5 shadow-sm backdrop-blur-sm"
+        >
+          <h2
+            id="agent-heading"
+            className="mb-1 text-lg font-semibold text-sage-800"
+          >
+            Console de contrôle
+          </h2>
+          <p className="mb-5 text-sm text-muted">
+            Gemini Function Calling · outil <code>generate_menu</code> · logs en
+            direct.
+          </p>
+          <AgentConsole />
+        </section>
+      )}
+
+      {section === 'profile' && (
+        <section
+          aria-labelledby="profile-heading"
+          className="rounded-2xl border border-sage-100 bg-white/80 p-5 shadow-sm backdrop-blur-sm"
+        >
+          <h2
+            id="profile-heading"
+            className="mb-1 text-lg font-semibold text-sage-800"
+          >
+            Profil & préférences
+          </h2>
+          <p className="mb-5 text-sm text-muted">
+            Nombre de personnes, budget hebdomadaire et régimes alimentaires.
+          </p>
+          <ProfileForm />
+        </section>
+      )}
+
+      {section === 'status' && (
+        <section
+          aria-live="polite"
+          className="rounded-2xl border border-sage-100 bg-white/80 p-5 shadow-sm backdrop-blur-sm"
+        >
+          <h2 className="mb-3 text-lg font-semibold text-sage-800">
+            Statut backend
+          </h2>
+
+          {state.status === 'loading' && (
+            <p className="text-muted">
+              Vérification de <code className="text-sage-800">/health</code>…
+            </p>
+          )}
+
+          {state.status === 'error' && (
+            <div className="space-y-2 text-sm">
+              <p className="font-medium text-red-700">API injoignable</p>
+              <p className="text-muted">{state.message}</p>
+              <p className="text-muted">
+                Lancez le backend :{' '}
+                <code className="rounded bg-sage-50 px-1.5 py-0.5 text-sage-800">
+                  uvicorn app.main:app --reload --port 8000
+                </code>
+              </p>
+            </div>
+          )}
+
+          {state.status === 'ok' && (
+            <div className="space-y-4">
+              <p className="text-sm text-muted">
+                <span className="font-medium text-sage-800">
+                  {state.data.service}
+                </span>
+                {' · '}v{state.data.version}
+                {' · '}
+                {state.data.environment}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <IntegrationPill
+                  label="Gemini"
+                  ready={state.data.integrations.gemini}
+                />
+                <IntegrationPill
+                  label="YouTube"
+                  ready={state.data.integrations.youtube}
+                />
+                <IntegrationPill
+                  label="Google Keep"
+                  ready={state.data.integrations.google_keep}
+                />
+              </div>
+            </div>
+          )}
+        </section>
+      )}
+    </div>
+  )
+}

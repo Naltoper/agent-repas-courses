@@ -1,0 +1,26 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "DM Sans", "Segoe UI", sans-serif;
+  --font-display: "Fraunces", Georgia, serif;
+  --color-sage-50: #f4f7f4;
+  --color-sage-100: #e4ece4;
+  --color-sage-600: #3d6b4f;
+  --color-sage-800: #1f3d2c;
+  --color-citrus: #e8a317;
+  --color-ink: #14201a;
+  --color-muted: #5a6b60;
+}
+
+@layer base {
+  html {
+    @apply antialiased;
+  }
+
+  body {
+    @apply m-0 min-h-svh bg-sage-50 font-sans text-ink;
+    background-image:
+      radial-gradient(ellipse 80% 50% at 10% -10%, #d9ead9 0%, transparent 55%),
+      radial-gradient(ellipse 60% 40% at 100% 0%, #f7e8c8 0%, transparent 50%);
+  }
+}

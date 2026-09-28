@@ -1,0 +1,17 @@
+# SmartChef Agent
+.DS_Store
+*.log
+.env
+.env.local
+
+# Python
+backend/.venv/
+backend/**/__pycache__/
+backend/**/*.py[cod]
+backend/.pytest_cache/
+backend/data/*.db
+backend/data/*.json
+
+# Node
+frontend/node_modules/
+frontend/dist/
