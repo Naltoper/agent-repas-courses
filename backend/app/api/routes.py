@@ -12,6 +12,7 @@ from app.agent import orchestrator
 from app.core.config import get_settings
 from app.core.gemini_models import GeminiModelsResponse, list_models_response
 from app.models.schemas import (
+    AgentFollowUpRequest,
     AgentRunRequest,
     AgentSession,
     HealthResponse,
@@ -25,7 +26,6 @@ router = APIRouter()
 
 @router.get("/health", response_model=HealthResponse)
 def health() -> HealthResponse:
-    """Liveness + configuration readiness (no secret values exposed)."""
     settings = get_settings()
     return HealthResponse(
         status="ok",
@@ -42,25 +42,25 @@ def health() -> HealthResponse:
 
 @router.get("/profile", response_model=UserProfile)
 def get_profile() -> UserProfile:
-    """Return the persisted profile, or defaults if none saved yet."""
     return profile_store.load_profile()
 
 
 @router.put("/profile", response_model=UserProfile)
 def put_profile(profile: UserProfile) -> UserProfile:
-    """Validate and persist the user profile to data/profile.json."""
     return profile_store.save_profile(profile)
 
 
 @router.get("/models", response_model=GeminiModelsResponse)
 def list_gemini_models() -> GeminiModelsResponse:
-    """List Gemini 3.x models available for profile selection + fallback chain."""
     return list_models_response()
 
 
 async def _execute_run_async(run_id: str) -> None:
-    """Run the blocking Gemini loop off the event loop."""
     await asyncio.to_thread(orchestrator.execute_run, run_id)
+
+
+async def _execute_follow_up_async(run_id: str, message: str) -> None:
+    await asyncio.to_thread(orchestrator.execute_follow_up, run_id, message)
 
 
 @router.post("/agent/run", response_model=AgentSession, status_code=202)
@@ -68,10 +68,39 @@ async def start_agent_run(
     body: AgentRunRequest,
     background_tasks: BackgroundTasks,
 ) -> AgentSession:
-    """Start an agent run in the background; poll or stream for progress."""
     session = orchestrator.start_run(body.prompt)
     background_tasks.add_task(_execute_run_async, session.id)
     return session
+
+
+@router.post("/agent/runs/{run_id}/message", response_model=AgentSession, status_code=202)
+async def follow_up_agent_run(
+    run_id: str,
+    body: AgentFollowUpRequest,
+    background_tasks: BackgroundTasks,
+) -> AgentSession:
+    session = run_store.get_run(run_id)
+    if session is None:
+        latest = run_store.get_latest()
+        if latest is None or latest.id != run_id:
+            raise HTTPException(status_code=404, detail="Run introuvable")
+        run_store.create_run(latest)
+        session = latest
+
+    if session.status == "running":
+        raise HTTPException(status_code=409, detail="Un tour agent est déjà en cours")
+    if session.result is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Session sans menu — lancez d'abord une génération réussie",
+        )
+
+    run_store.update_run(run_id, status="running", error=None)
+    background_tasks.add_task(_execute_follow_up_async, run_id, body.message)
+    refreshed = run_store.get_run(run_id)
+    if refreshed is None:
+        raise HTTPException(status_code=404, detail="Run introuvable")
+    return refreshed
 
 
 @router.get("/agent/runs/{run_id}", response_model=AgentSession)
@@ -92,10 +121,10 @@ def get_latest_session() -> AgentSession:
 
 @router.get("/agent/runs/{run_id}/stream")
 async def stream_agent_run(run_id: str) -> StreamingResponse:
-    """SSE stream of log events until the run completes or fails."""
-
     async def event_generator():
         last_count = 0
+        last_msg_count = 0
+        idle_rounds = 0
         while True:
             session = run_store.get_run(run_id)
             if session is None:
@@ -112,16 +141,37 @@ async def stream_agent_run(run_id: str) -> StreamingResponse:
                     }
                     yield f"event: log\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
                 last_count = len(session.logs)
+                idle_rounds = 0
+
+            if len(session.messages) > last_msg_count:
+                for msg in session.messages[last_msg_count:]:
+                    data = {
+                        "type": "chat",
+                        "message": msg.model_dump(mode="json"),
+                        "status": session.status,
+                    }
+                    yield f"event: chat\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+                last_msg_count = len(session.messages)
+                idle_rounds = 0
 
             if session.status in {"completed", "failed"}:
+                # Wait a tick in case follow-up flips status back to running
+                await asyncio.sleep(0.4)
+                again = run_store.get_run(run_id)
+                if again and again.status == "running":
+                    idle_rounds = 0
+                    continue
                 done = {
                     "type": "done",
                     "status": session.status,
-                    "session": session.model_dump(mode="json"),
+                    "session": (again or session).model_dump(mode="json"),
                 }
                 yield f"event: done\ndata: {json.dumps(done, ensure_ascii=False)}\n\n"
                 break
 
+            idle_rounds += 1
+            if idle_rounds > 600:
+                break
             await asyncio.sleep(0.35)
 
     return StreamingResponse(

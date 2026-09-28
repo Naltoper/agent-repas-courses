@@ -1,10 +1,9 @@
-# Bilan — SmartChef Agent (sélection fine du modèle Gemini)
+# Bilan — SmartChef Agent (jours recettes · conversation · courses/budget)
 
 **Rôle :** Développeur senior  
 **Date :** 2026-09-28  
-**Périmètre :** `model_selection_mode` / `preferred_model` persistés, API `/models`, fallback auto, UI profil  
-**Statut :** ✅ Livré et vérifié  
-**Commits :** `9ab70eb` (avant) → commit post-travail (après)
+**Périmètre :** `recipe_days` profil, follow-up conversationnel, P3 courses & budget  
+**Statut :** ✅ Livré et vérifié (run + follow-up Gemini)
 
 ---
 
@@ -12,58 +11,53 @@
 
 | Sujet | Choix |
 |-------|--------|
-| Persistance | Champs ajoutés à `UserProfile` → `data/profile.json` via ProfileStore |
-| Modes | `manual` = modèle imposé ; `auto` = préféré puis chaîne de secours |
-| Catalogue | Liste figée série **3.x** exposée par `GET /models` (select dynamique UI) |
-| Secours | `GEMINI_FALLBACK_MODELS` (env) + défauts code |
-| Orchestrateur | Recharge le profil **à chaque run** ; logs mode / chaîne / bascules |
-| Erreurs transient | Catch `APIError` (ClientError **et** ServerError 503) puis retry → fallback |
+| Jours de recettes | `recipe_days ∈ {3,5,7}` défaut **5**, persisté dans le profil |
+| Conversation | `POST /agent/runs/{id}/message` + `messages[]` sur la session |
+| Persistance | Snapshot JSON `latest_session.json` (menu + logs + messages) |
+| Courses/budget | Outils `build_shopping_list` + `estimate_budget` + **fallback auto** depuis ingrédients (évite blocage si le modèle ne rappelle pas les tools) |
+| Prix | Table heuristique `app/resources/prices.json` |
 
 ---
 
 ## 2. Fichiers touchés
 
 ### Backend
-- `app/models/schemas.py` — `ModelSelectionMode`, champs profil
-- `app/core/gemini_models.py` — **nouveau** catalogue + `resolve_model_chain`
-- `app/core/config.py` — `gemini_fallback_models`
-- `app/agent/orchestrator.py` — stratégie manuel/auto
-- `app/api/routes.py` — `GET /models`
-- `.env.example` — `GEMINI_FALLBACK_MODELS`
+- `app/models/schemas.py` — `recipe_days`, `ChatMessage`, `AgentFollowUpRequest`, `ingredients`
+- `app/agent/tools.py` — menu / courses / budget + `ensure_shopping_and_budget`
+- `app/agent/orchestrator.py` — prompt jours, loop tools, `execute_follow_up`
+- `app/api/routes.py` — follow-up + SSE `chat`
+- `app/core/pricing.py`, `app/resources/prices.json` — **nouveaux**
 
 ### Frontend
-- `src/types/domain.ts`, `src/api/client.ts`
-- `src/components/ProfileForm.tsx` — selects mode + modèle (chargé via `/models`)
-
-### Contexte
-- `.agent_context/last_summary.md`
+- `ProfileForm` — select 3/5/7 jours
+- `AgentConsole` — conversation, follow-up, courses par rayon, jauge budget
+- `types/domain.ts`, `api/client.ts`
 
 ---
 
 ## 3. Vérifications
 
-| Check | Résultat |
-|-------|----------|
-| `GET /models` | Catalogue 3.x + fallbacks |
-| `PUT/GET /profile` | `model_selection_mode` + `preferred_model` persistés |
-| Chaîne auto / manuel | Unit OK |
-| Run agent | Profil lu ; retry 503 puis **completed** (`generate_menu`, 2 jours) |
+| Test | Résultat |
+|------|----------|
+| Profil `recipe_days=3` | Persisté |
+| Run agent | **completed** — 3 jours, 13 articles, budget 41.8 € / 60 € |
+| Follow-up | Message utilisateur + réponse agent, session `completed` |
 | `npm run build` | OK |
 
 ---
 
 ## 4. Risques restants
 
-- Quotas / 503 Google peuvent épuiser toute la chaîne en mode auto.
-- Catalogue modèles maintenu à la main (pas un live list Models API).
-- Mode manuel n’a pas de filet de secours (comportement voulu).
+- Fallback courses = heuristique (rayons/prix approximatifs).
+- Latence Gemini / 503 toujours possibles en follow-up.
+- Sessions hors `latest` perdues au restart (mémoire).
 
 ---
 
 ## 5. Prochaine étape proposée
 
-**P3 — Courses & budget** (`build_shopping_list`, `estimate_budget`, indicateur UI).
+**P4/P5** — vidéos YouTube sur fiches recettes + sync Google Keep cochable.
 
 ---
 
-*Fin du bilan — sélection modèle Gemini.*
+*Fin du bilan.*

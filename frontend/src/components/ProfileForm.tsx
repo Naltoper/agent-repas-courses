@@ -4,6 +4,7 @@ import type {
   DietaryRegime,
   GeminiModelInfo,
   ModelSelectionMode,
+  RecipeDays,
   UserProfile,
 } from '../types/domain'
 
@@ -19,6 +20,7 @@ const REGIME_OPTIONS: { value: DietaryRegime; label: string }[] = [
 const EMPTY_PROFILE: UserProfile = {
   household_size: 2,
   weekly_budget_eur: 80,
+  recipe_days: 5,
   dietary_regimes: ['omnivore'],
   notes: '',
   model_selection_mode: 'auto',
@@ -128,7 +130,7 @@ export function ProfileForm() {
 
   return (
     <form className="space-y-5" onSubmit={onSubmit} noValidate>
-      <div className="grid gap-5 sm:grid-cols-2">
+      <div className="grid gap-5 sm:grid-cols-3">
         <label className="block space-y-1.5" htmlFor={`${formId}-size`}>
           <span className="text-sm font-medium text-sage-800">
             Nombre de personnes
@@ -171,6 +173,28 @@ export function ProfileForm() {
             }}
             className={selectClass}
           />
+        </label>
+
+        <label className="block space-y-1.5" htmlFor={`${formId}-days`}>
+          <span className="text-sm font-medium text-sage-800">
+            Jours de recettes
+          </span>
+          <select
+            id={`${formId}-days`}
+            value={profile.recipe_days}
+            onChange={(e) => {
+              setFeedback({ kind: 'idle' })
+              setProfile((p) => ({
+                ...p,
+                recipe_days: Number(e.target.value) as RecipeDays,
+              }))
+            }}
+            className={selectClass}
+          >
+            <option value={3}>3 jours</option>
+            <option value={5}>5 jours</option>
+            <option value={7}>7 jours</option>
+          </select>
         </label>
       </div>
 

@@ -9,6 +9,7 @@ export type DietaryRegime =
   | 'other'
 
 export type ModelSelectionMode = 'manual' | 'auto'
+export type RecipeDays = 3 | 5 | 7
 
 export interface IntegrationStatus {
   gemini: boolean
@@ -27,6 +28,7 @@ export interface HealthResponse {
 export interface UserProfile {
   household_size: number
   weekly_budget_eur: number
+  recipe_days: RecipeDays
   dietary_regimes: DietaryRegime[]
   notes: string
   model_selection_mode: ModelSelectionMode
@@ -57,6 +59,7 @@ export interface Recipe {
   title: string
   servings: number
   steps: string[]
+  ingredients: string[]
   youtube_video_id: string | null
   youtube_url: string | null
 }
@@ -73,6 +76,7 @@ export interface BudgetReport {
   weekly_budget_eur: number
   delta_eur: number
   within_budget: boolean
+  currency?: string
 }
 
 export interface MenuPlan {
@@ -90,6 +94,12 @@ export interface AgentLogEvent {
   timestamp: string | null
 }
 
+export interface ChatMessage {
+  role: 'user' | 'assistant' | 'system'
+  content: string
+  timestamp: string | null
+}
+
 export interface AgentSession {
   id: string
   status: 'pending' | 'running' | 'completed' | 'failed' | string
@@ -98,6 +108,7 @@ export interface AgentSession {
   result: MenuPlan | null
   keep: unknown
   logs: AgentLogEvent[]
+  messages: ChatMessage[]
   error: string | null
   summary: string | null
 }
