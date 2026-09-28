@@ -110,6 +110,26 @@ export async function loadHistorySession(runId: string): Promise<AgentSession> {
   return response.json() as Promise<AgentSession>
 }
 
+export async function renameHistorySession(
+  runId: string,
+  title: string,
+): Promise<AgentSession> {
+  const response = await fetch(`${API_BASE}/agent/sessions/${runId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title }),
+  })
+  if (!response.ok) throw new Error(await parseError(response))
+  return response.json() as Promise<AgentSession>
+}
+
+export async function deleteHistorySession(runId: string): Promise<void> {
+  const response = await fetch(`${API_BASE}/agent/sessions/${runId}`, {
+    method: 'DELETE',
+  })
+  if (!response.ok) throw new Error(await parseError(response))
+}
+
 export async function validateMenuSession(runId: string): Promise<AgentSession> {
   const response = await fetch(`${API_BASE}/agent/runs/${runId}/validate`, {
     method: 'POST',

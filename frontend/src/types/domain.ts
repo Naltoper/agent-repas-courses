@@ -30,7 +30,7 @@ export interface HealthResponse {
 
 export interface UserProfile {
   household_size: number
-  weekly_budget_eur: number
+  budget_eur: number
   recipe_days: number
   dietary_regimes: DietaryRegime[]
   notes: string
@@ -79,10 +79,14 @@ export interface ShoppingItem {
 
 export interface BudgetReport {
   estimated_total_eur: number
-  weekly_budget_eur: number
+  budget_eur: number
+  recipe_days: number
+  budget_per_day_eur: number
   delta_eur: number
   within_budget: boolean
   currency?: string
+  /** @deprecated compat anciennes sessions */
+  weekly_budget_eur?: number | null
 }
 
 export interface MenuPlan {

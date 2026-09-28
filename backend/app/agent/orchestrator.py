@@ -39,7 +39,8 @@ Ne te contente pas d'une réponse textuelle quand une action structurée est né
 Contraintes profil :
 - Nombre de personnes : {profile.household_size}
 - Nombre de jours de recettes : {profile.recipe_days}
-- Budget hebdomadaire cible : {profile.weekly_budget_eur} €
+- Budget global pour la période ({profile.recipe_days} jour(s)) : {profile.budget_eur} €
+  (soit ≈ {profile.budget_per_day_eur} € / jour)
 - Régimes / préférences : {regimes}
 - Notes : {notes}
 
@@ -378,7 +379,7 @@ def start_run(prompt: str) -> AgentSession:
         session.id,
         (
             f"Profil : {profile.recipe_days}j · {profile.household_size} pers. · "
-            f"budget {profile.weekly_budget_eur}€ · mode={profile.model_selection_mode.value} · "
+            f"budget {profile.budget_eur}€ / {profile.recipe_days}j · mode={profile.model_selection_mode.value} · "
             f"modèle={profile.preferred_model}"
         ),
     )

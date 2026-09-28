@@ -256,7 +256,9 @@ def execute_estimate_budget(
     return updated, {
         "ok": True,
         "estimated_total_eur": budget.estimated_total_eur,
-        "weekly_budget_eur": budget.weekly_budget_eur,
+        "budget_eur": budget.budget_eur,
+        "recipe_days": budget.recipe_days,
+        "budget_per_day_eur": budget.budget_per_day_eur,
         "delta_eur": budget.delta_eur,
         "within_budget": budget.within_budget,
         "message": (

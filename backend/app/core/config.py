@@ -76,5 +76,6 @@ def get_settings() -> Settings:
 def reload_settings() -> Settings:
     """Drop cache and re-read backend/.env (e.g. after editing secrets)."""
     get_settings.cache_clear()
-    load_dotenv(ENV_FILE, override=True)
+    # Do not override vars already set in the process (tests set DATA_DIR, etc.)
+    load_dotenv(ENV_FILE, override=False)
     return get_settings()

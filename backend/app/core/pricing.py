@@ -46,6 +46,14 @@ def estimate_item_price(name: str, aisle: str = "Divers") -> float:
     return float(data.get("default_unit_price_eur", 2.5))
 
 
+def period_budget_eur(profile: UserProfile) -> tuple[float, int, float]:
+    """Return (global budget for recipe period, days, per-day amount)."""
+    days = max(1, profile.recipe_days)
+    budget = float(profile.budget_eur)
+    per_day = round(budget / days, 2)
+    return budget, days, per_day
+
+
 def price_shopping_list(
     items: list[ShoppingItem],
     profile: UserProfile,
@@ -60,10 +68,13 @@ def price_shopping_list(
         total += float(price)
 
     total = round(total, 2)
-    budget = profile.weekly_budget_eur
+    budget, days, per_day = period_budget_eur(profile)
     delta = round(total - budget, 2)
     report = BudgetReport(
         estimated_total_eur=total,
+        budget_eur=budget,
+        recipe_days=days,
+        budget_per_day_eur=per_day,
         weekly_budget_eur=budget,
         delta_eur=delta,
         within_budget=total <= budget,

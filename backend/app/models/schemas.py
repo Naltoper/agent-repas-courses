@@ -39,7 +39,11 @@ class UserProfile(BaseModel):
     """User preferences (mono-utilisateur)."""
 
     household_size: int = Field(default=2, ge=1, le=12)
-    weekly_budget_eur: float = Field(default=80.0, ge=0)
+    budget_eur: float = Field(
+        default=80.0,
+        ge=0,
+        description="Budget global pour la période de recettes (recipe_days)",
+    )
     recipe_days: int = Field(default=5, ge=1, le=14)
     dietary_regimes: list[DietaryRegime] = Field(
         default_factory=lambda: [DietaryRegime.OMNIVORE],
@@ -52,6 +56,16 @@ class UserProfile(BaseModel):
         min_length=1,
         max_length=80,
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_weekly_budget(cls, data: object) -> object:
+        if not isinstance(data, dict):
+            return data
+        payload = dict(data)
+        if payload.get("budget_eur") is None and payload.get("weekly_budget_eur") is not None:
+            payload["budget_eur"] = payload["weekly_budget_eur"]
+        return payload
 
     @field_validator("dietary_regimes")
     @classmethod
@@ -73,6 +87,10 @@ class UserProfile(BaseModel):
         if not cleaned:
             raise ValueError("preferred_model ne peut pas être vide")
         return cleaned
+
+    @property
+    def budget_per_day_eur(self) -> float:
+        return round(self.budget_eur / max(1, self.recipe_days), 2)
 
 
 class ShoppingItem(BaseModel):
@@ -101,10 +119,34 @@ class ShoppingItem(BaseModel):
 
 class BudgetReport(BaseModel):
     estimated_total_eur: float
-    weekly_budget_eur: float
+    budget_eur: float = Field(description="Budget global pour la période de recettes")
+    recipe_days: int = Field(default=1, ge=1, le=14)
+    budget_per_day_eur: float = 0.0
     delta_eur: float
     within_budget: bool
     currency: str = "EUR"
+    # Compat lecture anciennes sessions / clients
+    weekly_budget_eur: float | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_and_derive(cls, data: object) -> object:
+        if not isinstance(data, dict):
+            return data
+        payload = dict(data)
+        if payload.get("budget_eur") is None and payload.get("weekly_budget_eur") is not None:
+            payload["budget_eur"] = payload["weekly_budget_eur"]
+        days = max(1, int(payload.get("recipe_days") or 1))
+        payload["recipe_days"] = days
+        budget = payload.get("budget_eur")
+        if budget is not None:
+            budget_f = float(budget)
+            payload["budget_eur"] = budget_f
+            if payload.get("budget_per_day_eur") is None:
+                payload["budget_per_day_eur"] = round(budget_f / days, 2)
+            if payload.get("weekly_budget_eur") is None:
+                payload["weekly_budget_eur"] = budget_f
+        return payload
 
 
 class Recipe(BaseModel):
@@ -204,6 +246,18 @@ class ShoppingCheckUpdate(BaseModel):
 
 class ShoppingBulkCheckUpdate(BaseModel):
     items: list[ShoppingCheckUpdate] = Field(default_factory=list)
+
+
+class SessionRenameRequest(BaseModel):
+    title: str = Field(..., min_length=1, max_length=120)
+
+    @field_validator("title")
+    @classmethod
+    def strip_title(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("Le titre ne peut pas être vide")
+        return cleaned
 
 
 class SessionSummary(BaseModel):

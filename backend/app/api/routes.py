@@ -17,6 +17,7 @@ from app.models.schemas import (
     AgentSession,
     HealthResponse,
     IntegrationStatus,
+    SessionRenameRequest,
     SessionSummary,
     ShoppingBulkCheckUpdate,
     ShoppingCheckUpdate,
@@ -142,11 +143,28 @@ def load_session(run_id: str) -> AgentSession:
     return loaded
 
 
+@router.patch("/agent/sessions/{run_id}", response_model=AgentSession)
+def rename_session(run_id: str, body: SessionRenameRequest) -> AgentSession:
+    updated = run_store.rename_session(run_id, body.title)
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Session introuvable")
+    return updated
+
+
+@router.delete("/agent/sessions/{run_id}", response_model=dict)
+def delete_session(run_id: str) -> dict:
+    if not run_store.delete_session(run_id):
+        raise HTTPException(status_code=404, detail="Session introuvable")
+    return {"ok": True, "id": run_id}
+
+
 @router.post("/agent/runs/{run_id}/validate", response_model=AgentSession)
 def validate_menu(run_id: str) -> AgentSession:
     session = _require_run(run_id)
     if session.result is None:
         raise HTTPException(status_code=400, detail="Aucun menu à valider")
+    # Ensure hydrated in memory before update (survives process restarts)
+    run_store.load_into_memory(session)
     updated = run_store.update_run(run_id, menu_validated=True)
     if updated is None:
         raise HTTPException(status_code=404, detail="Run introuvable")

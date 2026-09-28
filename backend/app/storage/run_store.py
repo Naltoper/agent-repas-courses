@@ -175,6 +175,22 @@ def append_log(
 
 
 def update_run(run_id: str, **fields: object) -> AgentSession | None:
+    """Update a run, hydrating from disk when the process no longer has it in memory."""
+    with _lock:
+        session = _runs.get(run_id)
+    if session is None:
+        # Load without holding the lock (get_run acquires it briefly)
+        session = get_run(run_id)
+        if session is None:
+            return None
+        with _lock:
+            # Another writer may have won; prefer in-memory if present
+            if run_id not in _runs:
+                _runs[run_id] = session
+                global _latest_id
+                if _latest_id is None:
+                    _latest_id = run_id
+
     with _lock:
         session = _runs.get(run_id)
         if session is None:
@@ -182,10 +198,58 @@ def update_run(run_id: str, **fields: object) -> AgentSession | None:
         payload = dict(fields)
         payload["updated_at"] = _now_iso()
         draft = session.model_copy(update=payload)
-        if not str(payload.get("title") or "").strip():
+        if "title" in payload:
+            title = str(payload.get("title") or "").strip()
+            draft = draft.model_copy(update={"title": title or _session_title(draft)})
+        elif not (draft.title or "").strip():
             draft = draft.model_copy(update={"title": _session_title(draft)})
         _runs[run_id] = draft
         return draft.model_copy(deep=True)
+
+
+def rename_session(run_id: str, title: str) -> AgentSession | None:
+    cleaned = title.strip()
+    if not cleaned:
+        return None
+    updated = update_run(run_id, title=cleaned)
+    if updated is None:
+        return None
+    persist_latest(updated)
+    return updated
+
+
+def delete_session(run_id: str) -> bool:
+    """Remove a session from history, disk, and memory. Returns False if unknown."""
+    global _latest_id
+    path = _history_dir() / f"{run_id}.json"
+    existed = path.exists()
+    with _lock:
+        in_memory = run_id in _runs
+        if in_memory:
+            del _runs[run_id]
+        if _latest_id == run_id:
+            _latest_id = None
+
+    if path.exists():
+        path.unlink()
+
+    latest_path = _data_dir() / SESSION_FILENAME
+    if latest_path.exists():
+        try:
+            candidate = AgentSession.model_validate_json(
+                latest_path.read_text(encoding="utf-8")
+            )
+            if candidate.id == run_id:
+                latest_path.unlink()
+        except Exception:
+            pass
+
+    existing = _read_index()
+    filtered = [s for s in existing if s.id != run_id]
+    if len(filtered) != len(existing):
+        _write_index(filtered)
+        existed = True
+    return existed or in_memory
 
 
 def persist_latest(session: AgentSession) -> None:

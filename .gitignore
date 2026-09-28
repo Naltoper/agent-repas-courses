@@ -12,6 +12,7 @@ backend/.pytest_cache/
 backend/data/*.db
 backend/data/*.json
 backend/data/sessions/
+backend/_test_data_run/
 
 # Node
 frontend/node_modules/

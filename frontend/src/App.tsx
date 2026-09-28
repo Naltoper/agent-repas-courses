@@ -158,7 +158,7 @@ function AppShell() {
             Profil & préférences
           </h2>
           <p className="mb-5 text-sm text-muted">
-            Foyer, budget, jours de recettes (max. 14) et régimes.
+            Foyer, budget de période, jours de recettes (max. 14) et régimes.
           </p>
           <ProfileForm />
         </section>

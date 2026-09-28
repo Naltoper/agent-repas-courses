@@ -18,7 +18,7 @@ const REGIME_OPTIONS: { value: DietaryRegime; label: string }[] = [
 
 const EMPTY_PROFILE: UserProfile = {
   household_size: 2,
-  weekly_budget_eur: 80,
+  budget_eur: 80,
   recipe_days: 5,
   dietary_regimes: ['omnivore'],
   notes: '',
@@ -54,11 +54,16 @@ export function ProfileForm() {
       fetchGeminiModels(controller.signal),
     ])
       .then(([data, catalog]) => {
+        const raw = data as UserProfile & { weekly_budget_eur?: number }
         setProfile({
           ...EMPTY_PROFILE,
-          ...data,
+          ...raw,
+          budget_eur:
+            raw.budget_eur ?? raw.weekly_budget_eur ?? EMPTY_PROFILE.budget_eur,
           preferred_model:
-            data.preferred_model || catalog.default_model || EMPTY_PROFILE.preferred_model,
+            raw.preferred_model ||
+            catalog.default_model ||
+            EMPTY_PROFILE.preferred_model,
         })
         setModels(catalog.models)
         setFallbackHint(catalog.fallback_models)
@@ -161,7 +166,7 @@ export function ProfileForm() {
 
         <label className="block space-y-1.5" htmlFor={`${formId}-budget`}>
           <span className="text-sm font-medium text-sage-800">
-            Budget hebdomadaire (€)
+            Budget période (€)
           </span>
           <input
             id={`${formId}-budget`}
@@ -169,16 +174,24 @@ export function ProfileForm() {
             min={0}
             step={1}
             required
-            value={profile.weekly_budget_eur}
+            value={profile.budget_eur}
             onChange={(e) => {
               setFeedback({ kind: 'idle' })
               setProfile((p) => ({
                 ...p,
-                weekly_budget_eur: Number(e.target.value) || 0,
+                budget_eur: Number(e.target.value) || 0,
               }))
             }}
             className={selectClass}
           />
+          <span className="text-xs text-muted">
+            Enveloppe globale pour {profile.recipe_days} jour
+            {profile.recipe_days > 1 ? 's' : ''}
+            {profile.recipe_days > 0
+              ? ` (≈ ${(profile.budget_eur / profile.recipe_days).toFixed(2)} €/j)`
+              : ''}
+            .
+          </span>
         </label>
 
         <label className="block space-y-1.5" htmlFor={`${formId}-days`}>

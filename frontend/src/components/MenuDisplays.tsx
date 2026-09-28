@@ -84,6 +84,13 @@ export function BudgetBanner({ menu }: { menu: MenuPlan }) {
   }
 
   const { budget } = menu
+  const envelope =
+    budget.budget_eur ?? budget.weekly_budget_eur ?? 0
+  const days = budget.recipe_days || menu.days.length || 1
+  const perDay =
+    budget.budget_per_day_eur ||
+    (days > 0 ? envelope / days : envelope)
+
   return (
     <div
       className={`rounded-lg px-4 py-3 text-sm ring-1 ${
@@ -96,10 +103,11 @@ export function BudgetBanner({ menu }: { menu: MenuPlan }) {
         Estimation globale : {budget.estimated_total_eur.toFixed(2)} €
         <span className="font-normal text-muted">
           {' '}
-          / budget {budget.weekly_budget_eur.toFixed(2)} €
+          / budget {envelope.toFixed(2)} € ({days} j)
         </span>
       </p>
       <p className="mt-1 text-xs opacity-80">
+        ≈ {perDay.toFixed(2)} € / jour ·{' '}
         {budget.within_budget
           ? `Dans le budget (marge ${(-budget.delta_eur).toFixed(2)} €)`
           : `Dépassement de ${budget.delta_eur.toFixed(2)} €`}
