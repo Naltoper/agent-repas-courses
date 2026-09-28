@@ -1,5 +1,8 @@
 """Core domain schemas."""
 
+from __future__ import annotations
+
+import re
 from enum import Enum
 from typing import Literal
 from uuid import uuid4
@@ -96,14 +99,35 @@ class UserProfile(BaseModel):
 class ShoppingItem(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
     name: str
-    quantity: str = "1"
+    quantity_g: float = Field(
+        default=0,
+        ge=0,
+        description="Quantité en grammes (référence d'affichage et de pricing)",
+    )
+    quantity: str = Field(
+        default="",
+        description="Libellé affichable, ex. '500 g' ou '6 œufs (~360 g)'",
+    )
+    unit: Literal["g", "unit"] = "g"
+    unit_count: float | None = Field(
+        default=None,
+        description="Nombre d'unités si unit=unit (ex. œufs)",
+    )
     aisle: str = "Divers"
-    estimated_price_eur: float | None = None
+    unit_price_eur: float | None = Field(
+        default=None,
+        description="Prix unitaire estimé (€/kg si unit=g, sinon €/unité)",
+    )
+    estimated_price_eur: float | None = Field(
+        default=None,
+        description="Prix total estimé pour la quantité de la ligne",
+    )
+    price_source: Literal["gemini", "heuristic", "override"] | None = None
     checked: bool = False
 
     @model_validator(mode="before")
     @classmethod
-    def ensure_stable_id(cls, data: object) -> object:
+    def normalize_quantity_and_id(cls, data: object) -> object:
         if not isinstance(data, dict):
             return data
         payload = dict(data)
@@ -114,7 +138,100 @@ class ShoppingItem(BaseModel):
             payload["id"] = f"{aisle}::{name}"
         if "checked" in payload and isinstance(payload["checked"], str):
             payload["checked"] = payload["checked"].lower() in {"1", "true", "yes"}
+
+        qty_g = payload.get("quantity_g")
+        qty_label = str(payload.get("quantity") or "").strip()
+        if qty_g is None or qty_g == "" or float(qty_g or 0) <= 0:
+            # Parse "500 g", "500g", "0.5 kg", plain numbers
+            parsed = _parse_grams_from_label(qty_label)
+            if parsed is not None:
+                payload["quantity_g"] = parsed
+            else:
+                payload["quantity_g"] = 100.0
+        else:
+            payload["quantity_g"] = float(qty_g)
+
+        if not qty_label:
+            g = float(payload["quantity_g"])
+            payload["quantity"] = (
+                f"{int(g)} g" if abs(g - int(g)) < 1e-6 else f"{g:g} g"
+            )
         return payload
+
+
+def _parse_grams_from_label(label: str) -> float | None:
+    if not label:
+        return None
+    text = label.lower().replace(",", ".")
+    kg = re.search(r"(\d+(?:\.\d+)?)\s*kg", text)
+    if kg:
+        return float(kg.group(1)) * 1000.0
+    grams = re.search(r"(\d+(?:\.\d+)?)\s*g\b", text)
+    if grams:
+        return float(grams.group(1))
+    ml = re.search(r"(\d+(?:\.\d+)?)\s*ml\b", text)
+    if ml:
+        return float(ml.group(1))  # approx 1 ml ≈ 1 g for pricing
+    plain = re.fullmatch(r"(\d+(?:\.\d+)?)", text.strip())
+    if plain:
+        return float(plain.group(1))
+    return None
+
+
+class Ingredient(BaseModel):
+    """Structured recipe ingredient with gram-first quantity."""
+
+    name: str
+    quantity_g: float = Field(default=100.0, ge=0)
+    quantity_label: str = ""
+
+    @model_validator(mode="before")
+    @classmethod
+    def coerce_from_string(cls, data: object) -> object:
+        if isinstance(data, str):
+            raw = data.strip()
+            if "—" in raw:
+                name, _, rest = raw.partition("—")
+            elif " - " in raw:
+                name, _, rest = raw.partition(" - ")
+            else:
+                parts = raw.rsplit(" ", 1)
+                if len(parts) == 2 and any(ch.isdigit() for ch in parts[1]):
+                    name, rest = parts[0], parts[1]
+                else:
+                    name, rest = raw, ""
+            payload = {
+                "name": name.strip() or raw,
+                "quantity_label": rest.strip() or raw,
+            }
+            parsed = _parse_grams_from_label(rest.strip())
+            if parsed is not None:
+                payload["quantity_g"] = parsed
+            return payload
+        if isinstance(data, dict):
+            payload = dict(data)
+            if not payload.get("quantity_label") and payload.get("quantity_g") is not None:
+                g = float(payload["quantity_g"])
+                payload["quantity_label"] = (
+                    f"{int(g)} g" if abs(g - int(g)) < 1e-6 else f"{g:g} g"
+                )
+            if payload.get("quantity_g") is None and payload.get("quantity_label"):
+                parsed = _parse_grams_from_label(str(payload["quantity_label"]))
+                if parsed is not None:
+                    payload["quantity_g"] = parsed
+            return payload
+        return data
+
+    @model_validator(mode="after")
+    def ensure_label(self) -> Ingredient:
+        if not self.quantity_label.strip():
+            g = self.quantity_g
+            object.__setattr__(
+                self,
+                "quantity_label",
+                f"{int(g)} g" if abs(g - int(g)) < 1e-6 else f"{g:g} g",
+            )
+        return self
 
 
 class BudgetReport(BaseModel):
@@ -153,7 +270,7 @@ class Recipe(BaseModel):
     title: str
     servings: int = 2
     steps: list[str] = Field(default_factory=list)
-    ingredients: list[str] = Field(default_factory=list)
+    ingredients: list[Ingredient] = Field(default_factory=list)
     prep_time_minutes: int = Field(
         default=20,
         ge=1,

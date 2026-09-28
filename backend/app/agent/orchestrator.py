@@ -47,7 +47,14 @@ Contraintes profil :
 Règles :
 - Le planning DOIT contenir exactement {profile.recipe_days} jour(s).
 - Chaque recette DOIT inclure `prep_time_minutes` (entier réaliste, ex. 20–45 min).
+- Chaque ingrédient DOIT avoir `quantity_g` (grammes) + `quantity_label` (ex. "400 g").
+  Pour les unités (œufs), convertis en grammes approximatifs et précise le libellé
+  (ex. name="Œufs", quantity_g=360, quantity_label="6 œufs (~360 g)").
 - Après un menu (initial ou modifié), appelle `build_shopping_list` puis `estimate_budget`.
+- `build_shopping_list` : agrège les produits, `quantity_g` = somme des grammes.
+- `estimate_budget` : pour CHAQUE article, estime `unit_price_per_kg_eur` et
+  `estimated_price_eur` = prix total pour la quantité réelle
+  (500 g de poulet ≠ 200 g). Prix magasin France réalistes.
 - Portions adaptées au nombre de personnes.
 - Respecte régimes et notes.
 - Réponds en français.

@@ -9,6 +9,7 @@ from google.genai import types
 from app.core.pricing import price_shopping_list
 from app.models.schemas import (
     DayMeal,
+    Ingredient,
     MenuPlan,
     Recipe,
     ShoppingItem,
@@ -23,7 +24,8 @@ GENERATE_MENU_DECLARATION = types.FunctionDeclaration(
     name=GENERATE_MENU_NAME,
     description=(
         "Enregistre ou remplace le menu structuré (planning + recettes avec ingrédients). "
-        "Respecte le nombre de jours demandé dans le profil."
+        "Respecte le nombre de jours demandé dans le profil. "
+        "Chaque ingrédient DOIT avoir une quantité en grammes."
     ),
     parameters_json_schema={
         "type": "object",
@@ -61,8 +63,27 @@ GENERATE_MENU_DECLARATION = types.FunctionDeclaration(
                         "steps": {"type": "array", "items": {"type": "string"}},
                         "ingredients": {
                             "type": "array",
-                            "items": {"type": "string"},
-                            "description": "Ingrédients avec quantités approximatives",
+                            "description": (
+                                "Ingrédients structurés avec quantité en grammes "
+                                "(prioritaire). Pour les unités (œufs), renseigner "
+                                "aussi quantity_label ex. '6 œufs (~360 g)'."
+                            ),
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "name": {"type": "string"},
+                                    "quantity_g": {
+                                        "type": "number",
+                                        "description": "Quantité en grammes",
+                                        "minimum": 1,
+                                    },
+                                    "quantity_label": {
+                                        "type": "string",
+                                        "description": "Ex. '400 g' ou '6 œufs (~360 g)'",
+                                    },
+                                },
+                                "required": ["name", "quantity_g"],
+                            },
                         },
                     },
                     "required": ["title", "steps", "ingredients", "prep_time_minutes"],
@@ -76,8 +97,9 @@ GENERATE_MENU_DECLARATION = types.FunctionDeclaration(
 BUILD_SHOPPING_LIST_DECLARATION = types.FunctionDeclaration(
     name=BUILD_SHOPPING_LIST_NAME,
     description=(
-        "Construit la liste de courses groupée par rayon à partir du menu. "
-        "À appeler après generate_menu ou après une modification du menu."
+        "Construit la liste de courses agrégée par rayon à partir du menu. "
+        "Chaque article DOIT avoir quantity_g (grammes) et un libellé quantity. "
+        "Agrège les mêmes produits en additionnant les grammes."
     ),
     parameters_json_schema={
         "type": "object",
@@ -88,7 +110,15 @@ BUILD_SHOPPING_LIST_DECLARATION = types.FunctionDeclaration(
                     "type": "object",
                     "properties": {
                         "name": {"type": "string"},
-                        "quantity": {"type": "string"},
+                        "quantity_g": {
+                            "type": "number",
+                            "description": "Quantité totale en grammes",
+                            "minimum": 1,
+                        },
+                        "quantity": {
+                            "type": "string",
+                            "description": "Libellé affichable, ex. '500 g'",
+                        },
                         "aisle": {
                             "type": "string",
                             "description": (
@@ -98,7 +128,7 @@ BUILD_SHOPPING_LIST_DECLARATION = types.FunctionDeclaration(
                             ),
                         },
                     },
-                    "required": ["name", "quantity", "aisle"],
+                    "required": ["name", "quantity_g", "aisle"],
                 },
             },
         },
@@ -109,18 +139,44 @@ BUILD_SHOPPING_LIST_DECLARATION = types.FunctionDeclaration(
 ESTIMATE_BUDGET_DECLARATION = types.FunctionDeclaration(
     name=ESTIMATE_BUDGET_NAME,
     description=(
-        "Estime le coût de la liste de courses courante et compare au budget profil. "
-        "Optionnellement ajuste des prix unitaires."
+        "Estime dynamiquement le prix de CHAQUE article de la liste de courses "
+        "selon sa quantité réelle en grammes (prix magasin France approximatif). "
+        "Ne pas utiliser un prix fixe indépendant de la quantité : "
+        "500 g de poulet ≠ 200 g. Puis compare au budget profil."
     ),
     parameters_json_schema={
         "type": "object",
         "properties": {
-            "price_overrides": {
-                "type": "object",
-                "description": "Map nom d'article -> prix EUR unitaire (optionnel)",
-                "additionalProperties": {"type": "number"},
+            "items": {
+                "type": "array",
+                "description": "Prix estimés par l'IA pour chaque ligne (même noms que la liste).",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"},
+                        "quantity_g": {
+                            "type": "number",
+                            "description": "Quantité en grammes (doit coller à la liste)",
+                        },
+                        "unit_price_per_kg_eur": {
+                            "type": "number",
+                            "description": "Prix estimé au kg (€/kg)",
+                            "minimum": 0,
+                        },
+                        "estimated_price_eur": {
+                            "type": "number",
+                            "description": (
+                                "Prix TOTAL pour quantity_g "
+                                "(≈ unit_price_per_kg_eur × quantity_g / 1000)"
+                            ),
+                            "minimum": 0,
+                        },
+                    },
+                    "required": ["name", "quantity_g", "estimated_price_eur"],
+                },
             },
         },
+        "required": ["items"],
     },
 )
 
@@ -192,17 +248,12 @@ def _merge_checked_state(
         if prior is None:
             merged.append(item)
             continue
-        merged.append(
-            item.model_copy(
-                update={
-                    "id": prior.id,
-                    "checked": prior.checked,
-                    "estimated_price_eur": item.estimated_price_eur
-                    if item.estimated_price_eur is not None
-                    else prior.estimated_price_eur,
-                }
-            )
-        )
+        updates: dict[str, Any] = {"id": prior.id, "checked": prior.checked}
+        if item.estimated_price_eur is None and prior.estimated_price_eur is not None:
+            updates["estimated_price_eur"] = prior.estimated_price_eur
+            updates["unit_price_eur"] = prior.unit_price_eur
+            updates["price_source"] = prior.price_source
+        merged.append(item.model_copy(update=updates))
     return merged
 
 
@@ -218,14 +269,15 @@ def execute_build_shopping_list(
 
     items = [ShoppingItem.model_validate(item) for item in raw_items]
     items = _merge_checked_state(items, menu.shopping_list)
-    priced, budget = price_shopping_list(items, profile)
+    # Do not force heuristic yet if estimate_budget will price — but keep provisional totals
+    priced, budget = price_shopping_list(items, profile, fill_missing_only=True)
     updated = menu.model_copy(update={"shopping_list": priced, "budget": budget})
     return updated, {
         "ok": True,
         "items_count": len(priced),
         "estimated_total_eur": budget.estimated_total_eur,
         "within_budget": budget.within_budget,
-        "message": "Liste de courses générée et estimée",
+        "message": "Liste de courses générée (prix provisoires — estimez via estimate_budget)",
     }
 
 
@@ -238,21 +290,72 @@ def execute_estimate_budget(
     if not menu.shopping_list:
         raise ValueError("Aucune liste de courses — appelez build_shopping_list d'abord")
 
+    gemini_items = args.get("items") or []
+    by_name: dict[str, dict[str, Any]] = {}
+    for raw in gemini_items:
+        if not isinstance(raw, dict):
+            continue
+        name = str(raw.get("name") or "").strip().lower()
+        if not name:
+            continue
+        by_name[name] = raw
+
+    # Legacy overrides map still accepted
     overrides = args.get("price_overrides") or {}
+
     items: list[ShoppingItem] = []
     for item in menu.shopping_list:
+        key = item.name.strip().lower()
+        raw = by_name.get(key)
+        if raw is None:
+            # fuzzy: substring match
+            for cand_name, cand in by_name.items():
+                if cand_name in key or key in cand_name:
+                    raw = cand
+                    break
+
+        if raw is not None:
+            total = float(raw.get("estimated_price_eur"))
+            per_kg = raw.get("unit_price_per_kg_eur")
+            qty_g = raw.get("quantity_g")
+            updates: dict[str, Any] = {
+                "estimated_price_eur": round(total, 2),
+                "price_source": "gemini",
+            }
+            if per_kg is not None:
+                updates["unit_price_eur"] = round(float(per_kg), 2)
+            elif item.quantity_g > 0:
+                updates["unit_price_eur"] = round(total / (item.quantity_g / 1000.0), 2)
+            if qty_g is not None and float(qty_g) > 0:
+                updates["quantity_g"] = float(qty_g)
+                g = float(qty_g)
+                updates["quantity"] = (
+                    f"{int(g)} g" if abs(g - int(g)) < 1e-6 else f"{g:g} g"
+                )
+            items.append(item.model_copy(update=updates))
+            continue
+
         override = None
-        for key, value in overrides.items():
-            if key.lower() in item.name.lower() or item.name.lower() in key.lower():
+        for okey, value in overrides.items():
+            if okey.lower() in item.name.lower() or item.name.lower() in okey.lower():
                 override = float(value)
                 break
         if override is not None:
-            items.append(item.model_copy(update={"estimated_price_eur": override}))
+            items.append(
+                item.model_copy(
+                    update={
+                        "estimated_price_eur": round(override, 2),
+                        "price_source": "override",
+                    }
+                )
+            )
         else:
-            items.append(item)
+            # leave for heuristic fill
+            items.append(item.model_copy(update={"estimated_price_eur": None}))
 
-    priced, budget = price_shopping_list(items, profile)
+    priced, budget = price_shopping_list(items, profile, fill_missing_only=True)
     updated = menu.model_copy(update={"shopping_list": priced, "budget": budget})
+    gemini_count = sum(1 for i in priced if i.price_source == "gemini")
     return updated, {
         "ok": True,
         "estimated_total_eur": budget.estimated_total_eur,
@@ -261,6 +364,7 @@ def execute_estimate_budget(
         "budget_per_day_eur": budget.budget_per_day_eur,
         "delta_eur": budget.delta_eur,
         "within_budget": budget.within_budget,
+        "gemini_priced_count": gemini_count,
         "message": (
             "Budget respecté"
             if budget.within_budget
@@ -298,6 +402,17 @@ def _guess_aisle(name: str) -> str:
     return "Épicerie"
 
 
+def _ingredient_to_shopping(ing: Ingredient | str) -> ShoppingItem:
+    if isinstance(ing, str):
+        ing = Ingredient.model_validate(ing)
+    return ShoppingItem(
+        name=ing.name,
+        quantity_g=ing.quantity_g,
+        quantity=ing.quantity_label or f"{ing.quantity_g:g} g",
+        aisle=_guess_aisle(ing.name),
+    )
+
+
 def ensure_shopping_and_budget(
     menu: MenuPlan,
     profile: UserProfile,
@@ -310,21 +425,32 @@ def ensure_shopping_and_budget(
         aggregated: dict[str, ShoppingItem] = {}
         for recipe in menu.recipes:
             for raw in recipe.ingredients:
-                name = raw.strip()
-                if not name:
-                    continue
-                key = name.lower()
+                item = _ingredient_to_shopping(raw)
+                key = item.name.strip().lower()
                 if key in aggregated:
-                    continue
-                aggregated[key] = ShoppingItem(
-                    name=name,
-                    quantity="1",
-                    aisle=_guess_aisle(name),
-                )
+                    prev = aggregated[key]
+                    new_g = prev.quantity_g + item.quantity_g
+                    aggregated[key] = prev.model_copy(
+                        update={
+                            "quantity_g": new_g,
+                            "quantity": (
+                                f"{int(new_g)} g"
+                                if abs(new_g - int(new_g)) < 1e-6
+                                else f"{new_g:g} g"
+                            ),
+                        }
+                    )
+                else:
+                    aggregated[key] = item
         items = list(aggregated.values())
         if not items:
             items = [
-                ShoppingItem(name=recipe.title, quantity="1", aisle="Divers")
+                ShoppingItem(
+                    name=recipe.title,
+                    quantity_g=500,
+                    quantity="500 g",
+                    aisle="Divers",
+                )
                 for recipe in menu.recipes
             ]
         priced, budget = price_shopping_list(items, profile)

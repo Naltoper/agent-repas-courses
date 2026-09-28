@@ -1,4 +1,11 @@
 import type { MenuPlan, Recipe } from '../types/domain'
+import {
+  formatIngredientLine,
+  formatShoppingPrice,
+  formatShoppingQuantity,
+  formatUnitPrice,
+  priceSourceHint,
+} from '../utils/shoppingFormat'
 
 export function formatPrepTime(minutes: number | null | undefined): string {
   if (minutes == null || Number.isNaN(minutes) || minutes <= 0) {
@@ -60,7 +67,9 @@ function RecipeCard({ recipe }: { recipe: Recipe }) {
       {recipe.ingredients?.length > 0 && (
         <ul className="mt-2 list-disc space-y-0.5 pl-5 text-sm text-muted">
           {recipe.ingredients.map((ing, i) => (
-            <li key={`${recipe.title}-ing-${i}`}>{ing}</li>
+            <li key={`${recipe.title}-ing-${i}`}>
+              {formatIngredientLine(ing)}
+            </li>
           ))}
         </ul>
       )}
@@ -142,24 +151,30 @@ export function ShoppingByAisle({ menu }: { menu: MenuPlan }) {
             {aisle}
           </p>
           <ul className="rounded-lg bg-white/70 text-sm ring-1 ring-sage-100">
-            {items.map((item) => (
-              <li
-                key={item.id || `${aisle}-${item.name}`}
-                className={`flex items-center justify-between gap-2 border-b border-sage-50 px-3 py-1.5 last:border-0 ${
-                  item.checked ? 'opacity-50' : ''
-                }`}
-              >
-                <span className={item.checked ? 'line-through' : ''}>
-                  {item.name}{' '}
-                  <span className="text-muted">× {item.quantity}</span>
-                </span>
-                <span className="text-muted">
-                  {item.estimated_price_eur != null
-                    ? `${item.estimated_price_eur.toFixed(2)} €`
-                    : '—'}
-                </span>
-              </li>
-            ))}
+            {items.map((item) => {
+              const unit = formatUnitPrice(item)
+              const hint = priceSourceHint(item)
+              return (
+                <li
+                  key={item.id || `${aisle}-${item.name}`}
+                  className={`flex items-start justify-between gap-3 border-b border-sage-50 px-3 py-2 last:border-0 ${
+                    item.checked ? 'opacity-50' : ''
+                  }`}
+                >
+                  <span className={item.checked ? 'line-through' : ''}>
+                    <span className="font-medium text-sage-800">{item.name}</span>
+                    <span className="mt-0.5 block text-xs text-muted">
+                      {formatShoppingQuantity(item)}
+                      {unit ? ` · ${unit}` : ''}
+                      {hint ? ` · ${hint}` : ''}
+                    </span>
+                  </span>
+                  <span className="shrink-0 text-sm font-medium text-sage-800">
+                    {formatShoppingPrice(item)}
+                  </span>
+                </li>
+              )
+            })}
           </ul>
         </div>
       ))}

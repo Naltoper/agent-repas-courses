@@ -166,6 +166,79 @@ def _run() -> None:
     ids = {s["id"] for s in listing2.json()}
     assert "sess-validate-1" not in ids
     print("OK rename/delete")
+
+    # --- quantity_g + Gemini line pricing ---
+    from app.agent.tools import execute_estimate_budget
+    from app.models.schemas import DayMeal, MenuPlan, Recipe, ShoppingItem
+
+    menu = MenuPlan(
+        prompt="pricing",
+        days=[DayMeal(day="Lundi", recipe_title="Test")],
+        recipes=[
+            Recipe(
+                title="Test",
+                steps=["a"],
+                ingredients=[{"name": "Poulet", "quantity_g": 500}],
+            )
+        ],
+        shopping_list=[
+            ShoppingItem(
+                name="Poulet",
+                quantity_g=500,
+                quantity="500 g",
+                aisle="Viandes & Poissons",
+            )
+        ],
+    )
+    profile = profile_store.load_profile()
+    priced_500, _ = execute_estimate_budget(
+        {
+            "items": [
+                {
+                    "name": "Poulet",
+                    "quantity_g": 500,
+                    "unit_price_per_kg_eur": 10,
+                    "estimated_price_eur": 5.0,
+                }
+            ]
+        },
+        menu=menu,
+        profile=profile,
+    )
+    assert priced_500.shopping_list[0].estimated_price_eur == 5.0
+    assert priced_500.shopping_list[0].price_source == "gemini"
+    menu_200 = menu.model_copy(
+        update={
+            "shopping_list": [
+                ShoppingItem(
+                    name="Poulet",
+                    quantity_g=200,
+                    quantity="200 g",
+                    aisle="Viandes & Poissons",
+                )
+            ]
+        }
+    )
+    priced_200, _ = execute_estimate_budget(
+        {
+            "items": [
+                {
+                    "name": "Poulet",
+                    "quantity_g": 200,
+                    "unit_price_per_kg_eur": 10,
+                    "estimated_price_eur": 2.0,
+                }
+            ]
+        },
+        menu=menu_200,
+        profile=profile,
+    )
+    assert priced_200.shopping_list[0].estimated_price_eur == 2.0
+    assert (
+        priced_200.shopping_list[0].estimated_price_eur
+        < priced_500.shopping_list[0].estimated_price_eur
+    )
+    print("OK quantity-aware Gemini pricing")
     print("All API smoke tests passed.")
 
 

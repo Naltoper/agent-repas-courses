@@ -58,11 +58,17 @@ export interface DayMeal {
   notes: string
 }
 
+export interface Ingredient {
+  name: string
+  quantity_g: number
+  quantity_label: string
+}
+
 export interface Recipe {
   title: string
   servings: number
   steps: string[]
-  ingredients: string[]
+  ingredients: Ingredient[]
   prep_time_minutes: number | null
   youtube_video_id: string | null
   youtube_url: string | null
@@ -71,9 +77,14 @@ export interface Recipe {
 export interface ShoppingItem {
   id: string
   name: string
+  quantity_g: number
   quantity: string
+  unit?: 'g' | 'unit'
+  unit_count?: number | null
   aisle: string
+  unit_price_eur: number | null
   estimated_price_eur: number | null
+  price_source?: 'gemini' | 'heuristic' | 'override' | null
   checked: boolean
 }
 
