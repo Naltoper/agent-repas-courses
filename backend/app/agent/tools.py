@@ -49,6 +49,10 @@ GENERATE_MENU_DECLARATION = types.FunctionDeclaration(
                     "properties": {
                         "title": {"type": "string"},
                         "servings": {"type": "integer"},
+                        "prep_time_minutes": {
+                            "type": "integer",
+                            "description": "Temps de préparation estimé en minutes",
+                        },
                         "steps": {"type": "array", "items": {"type": "string"}},
                         "ingredients": {
                             "type": "array",
@@ -56,7 +60,7 @@ GENERATE_MENU_DECLARATION = types.FunctionDeclaration(
                             "description": "Ingrédients avec quantités approximatives",
                         },
                     },
-                    "required": ["title", "steps", "ingredients"],
+                    "required": ["title", "steps", "ingredients", "prep_time_minutes"],
                 },
             },
         },

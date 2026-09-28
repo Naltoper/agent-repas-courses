@@ -84,6 +84,15 @@ export async function fetchAgentRun(
   return response.json() as Promise<AgentSession>
 }
 
+export async function fetchLatestSession(
+  signal?: AbortSignal,
+): Promise<AgentSession | null> {
+  const response = await fetch(`${API_BASE}/agent/sessions/latest`, { signal })
+  if (response.status === 404) return null
+  if (!response.ok) throw new Error(await parseError(response))
+  return response.json() as Promise<AgentSession>
+}
+
 export function agentRunStreamUrl(runId: string): string {
   return `${API_BASE}/agent/runs/${runId}/stream`
 }

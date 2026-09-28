@@ -45,7 +45,7 @@ Contraintes profil :
 
 Règles :
 - Le planning DOIT contenir exactement {profile.recipe_days} jour(s).
-- Chaque recette doit avoir des étapes ET une liste d'ingrédients.
+- Chaque recette doit avoir des étapes, des ingrédients ET un temps de préparation (`prep_time_minutes`).
 - Après un menu (initial ou modifié), appelle `build_shopping_list` puis `estimate_budget`.
 - Portions adaptées au nombre de personnes.
 - Respecte régimes et notes.

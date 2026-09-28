@@ -1,9 +1,9 @@
-# Bilan — SmartChef Agent (jours recettes · conversation · courses/budget)
+# Bilan — SmartChef Agent (UX peaufinage ↔ estimation)
 
 **Rôle :** Développeur senior  
 **Date :** 2026-09-28  
-**Périmètre :** `recipe_days` profil, follow-up conversationnel, P3 courses & budget  
-**Statut :** ✅ Livré et vérifié (run + follow-up Gemini)
+**Périmètre :** Ergonomie menu (jours libres ≤14, persistance onglets, validation / estimation, temps de préparation) — **sans** YouTube / Keep  
+**Statut :** ✅ Livré (`npm run build` + validation Pydantic OK)
 
 ---
 
@@ -11,53 +11,42 @@
 
 | Sujet | Choix |
 |-------|--------|
-| Jours de recettes | `recipe_days ∈ {3,5,7}` défaut **5**, persisté dans le profil |
-| Conversation | `POST /agent/runs/{id}/message` + `messages[]` sur la session |
-| Persistance | Snapshot JSON `latest_session.json` (menu + logs + messages) |
-| Courses/budget | Outils `build_shopping_list` + `estimate_budget` + **fallback auto** depuis ingrédients (évite blocage si le modèle ne rappelle pas les tools) |
-| Prix | Table heuristique `app/resources/prices.json` |
+| Jours | `recipe_days: int` **1–14** (input number + clamp UI + validation API) |
+| Persistance UI | `AgentWorkspaceProvider` (React Context) + restauration `GET /agent/sessions/latest` |
+| Parcours | Console peaufinage → **Valider ce menu** → vue **Estimation** ; **Modifier le menu** revient à la console |
+| Revalidation | Follow-up invalide le flag `menuValidated` ; revalider affiche budget/courses recalculés (déjà mis à jour par l’agent) |
+| Prep time | `Recipe.prep_time_minutes` (outil Gemini + cartes UI « Préparation : X min ») |
+| Hors scope | Pas de Keep / YouTube |
 
 ---
 
 ## 2. Fichiers touchés
 
 ### Backend
-- `app/models/schemas.py` — `recipe_days`, `ChatMessage`, `AgentFollowUpRequest`, `ingredients`
-- `app/agent/tools.py` — menu / courses / budget + `ensure_shopping_and_budget`
-- `app/agent/orchestrator.py` — prompt jours, loop tools, `execute_follow_up`
-- `app/api/routes.py` — follow-up + SSE `chat`
-- `app/core/pricing.py`, `app/resources/prices.json` — **nouveaux**
+- `app/models/schemas.py` — `recipe_days` 1–14, `prep_time_minutes`
+- `app/agent/tools.py` / `orchestrator.py` — schéma outil + consignes
 
 ### Frontend
-- `ProfileForm` — select 3/5/7 jours
-- `AgentConsole` — conversation, follow-up, courses par rayon, jauge budget
-- `types/domain.ts`, `api/client.ts`
+- `state/AgentWorkspaceContext.tsx` — **nouveau** state global agent
+- `components/AgentConsole.tsx` — peaufinage + Valider
+- `components/EstimationView.tsx` — **nouveau** budget / courses
+- `components/MenuDisplays.tsx` — **nouveau** cartes + prep time
+- `components/ProfileForm.tsx` — input jours ≤14
+- `App.tsx`, `api/client.ts`, `types/domain.ts`
 
 ---
 
-## 3. Vérifications
+## 3. Risques restants
 
-| Test | Résultat |
-|------|----------|
-| Profil `recipe_days=3` | Persisté |
-| Run agent | **completed** — 3 jours, 13 articles, budget 41.8 € / 60 € |
-| Follow-up | Message utilisateur + réponse agent, session `completed` |
-| `npm run build` | OK |
+- Flag `menuValidated` non persisté serveur (rechargé à false après F5 même si session restaurée) — volontaire pour forcer relecture / revalidation.
+- Anciennes recettes sans `prep_time_minutes` → libellé « non estimée ».
 
 ---
 
-## 4. Risques restants
+## 4. Prochaine étape proposée
 
-- Fallback courses = heuristique (rayons/prix approximatifs).
-- Latence Gemini / 503 toujours possibles en follow-up.
-- Sessions hors `latest` perdues au restart (mémoire).
+**P4/P5** — YouTube embeds + export Google Keep, une fois le parcours UX stable.
 
 ---
 
-## 5. Prochaine étape proposée
-
-**P4/P5** — vidéos YouTube sur fiches recettes + sync Google Keep cochable.
-
----
-
-*Fin du bilan.*
+*Fin du bilan — UX peaufinage / estimation.*

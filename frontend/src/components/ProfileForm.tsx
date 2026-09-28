@@ -4,7 +4,6 @@ import type {
   DietaryRegime,
   GeminiModelInfo,
   ModelSelectionMode,
-  RecipeDays,
   UserProfile,
 } from '../types/domain'
 
@@ -93,6 +92,13 @@ export function ProfileForm() {
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    if (profile.recipe_days < 1 || profile.recipe_days > 14) {
+      setFeedback({
+        kind: 'error',
+        message: 'Le nombre de jours doit être entre 1 et 14.',
+      })
+      return
+    }
     setFeedback({ kind: 'saving' })
     try {
       const saved = await saveProfile(profile)
@@ -179,22 +185,26 @@ export function ProfileForm() {
           <span className="text-sm font-medium text-sage-800">
             Jours de recettes
           </span>
-          <select
+          <input
             id={`${formId}-days`}
+            type="number"
+            min={1}
+            max={14}
+            required
             value={profile.recipe_days}
             onChange={(e) => {
               setFeedback({ kind: 'idle' })
-              setProfile((p) => ({
-                ...p,
-                recipe_days: Number(e.target.value) as RecipeDays,
-              }))
+              const raw = Number(e.target.value)
+              const clamped = Number.isFinite(raw)
+                ? Math.min(14, Math.max(1, Math.round(raw)))
+                : 1
+              setProfile((p) => ({ ...p, recipe_days: clamped }))
             }}
             className={selectClass}
-          >
-            <option value={3}>3 jours</option>
-            <option value={5}>5 jours</option>
-            <option value={7}>7 jours</option>
-          </select>
+          />
+          <span className="text-xs text-muted">
+            Saisie libre, maximum 14 jours.
+          </span>
         </label>
       </div>
 

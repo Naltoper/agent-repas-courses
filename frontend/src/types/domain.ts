@@ -9,7 +9,8 @@ export type DietaryRegime =
   | 'other'
 
 export type ModelSelectionMode = 'manual' | 'auto'
-export type RecipeDays = 3 | 5 | 7
+
+export type AppSection = 'agent' | 'results' | 'profile' | 'status'
 
 export interface IntegrationStatus {
   gemini: boolean
@@ -28,7 +29,7 @@ export interface HealthResponse {
 export interface UserProfile {
   household_size: number
   weekly_budget_eur: number
-  recipe_days: RecipeDays
+  recipe_days: number
   dietary_regimes: DietaryRegime[]
   notes: string
   model_selection_mode: ModelSelectionMode
@@ -60,6 +61,7 @@ export interface Recipe {
   servings: number
   steps: string[]
   ingredients: string[]
+  prep_time_minutes: number | null
   youtube_video_id: string | null
   youtube_url: string | null
 }

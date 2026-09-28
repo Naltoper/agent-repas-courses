@@ -39,7 +39,7 @@ class UserProfile(BaseModel):
 
     household_size: int = Field(default=2, ge=1, le=12)
     weekly_budget_eur: float = Field(default=80.0, ge=0)
-    recipe_days: Literal[3, 5, 7] = 5
+    recipe_days: int = Field(default=5, ge=1, le=14)
     dietary_regimes: list[DietaryRegime] = Field(
         default_factory=lambda: [DietaryRegime.OMNIVORE],
         min_length=1,
@@ -94,6 +94,12 @@ class Recipe(BaseModel):
     servings: int = 2
     steps: list[str] = Field(default_factory=list)
     ingredients: list[str] = Field(default_factory=list)
+    prep_time_minutes: int | None = Field(
+        default=None,
+        ge=1,
+        le=480,
+        description="Temps de préparation estimé en minutes",
+    )
     youtube_video_id: str | None = None
     youtube_url: str | None = None
 

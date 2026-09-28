@@ -1,15 +1,18 @@
 import { useEffect, useState } from 'react'
 import { fetchHealth } from './api/client'
 import { AgentConsole } from './components/AgentConsole'
+import { EstimationView } from './components/EstimationView'
 import { ProfileForm } from './components/ProfileForm'
-import type { HealthResponse } from './types/domain'
+import {
+  AgentWorkspaceProvider,
+  useAgentWorkspace,
+} from './state/AgentWorkspaceContext'
+import type { AppSection, HealthResponse } from './types/domain'
 
 type LoadState =
   | { status: 'loading' }
   | { status: 'ok'; data: HealthResponse }
   | { status: 'error'; message: string }
-
-type Section = 'profile' | 'agent' | 'status'
 
 function IntegrationPill({ label, ready }: { label: string; ready: boolean }) {
   return (
@@ -30,13 +33,12 @@ function IntegrationPill({ label, ready }: { label: string; ready: boolean }) {
   )
 }
 
-export default function App() {
+function AppShell() {
   const [state, setState] = useState<LoadState>({ status: 'loading' })
-  const [section, setSection] = useState<Section>('agent')
+  const { section, setSection, menuValidated, session } = useAgentWorkspace()
 
   useEffect(() => {
     const controller = new AbortController()
-
     fetchHealth(controller.signal)
       .then((data) => setState({ status: 'ok', data }))
       .catch((err: unknown) => {
@@ -45,11 +47,10 @@ export default function App() {
           err instanceof Error ? err.message : 'Impossible de joindre l’API'
         setState({ status: 'error', message })
       })
-
     return () => controller.abort()
   }, [])
 
-  const navBtn = (id: Section, label: string) => (
+  const navBtn = (id: AppSection, label: string) => (
     <button
       type="button"
       onClick={() => setSection(id)}
@@ -60,6 +61,9 @@ export default function App() {
       }`}
     >
       {label}
+      {id === 'results' && menuValidated && session?.result ? (
+        <span className="ml-1 text-citrus">●</span>
+      ) : null}
     </button>
   )
 
@@ -73,16 +77,14 @@ export default function App() {
           Planifier. Cuisiner. Courses.
         </h1>
         <p className="mt-3 max-w-xl text-muted">
-          Lancez l’agent avec une consigne en langage naturel — le menu s’appuie
-          sur votre profil.
+          Peaufinez votre menu avec l’agent, validez-le, puis consultez budget et
+          courses — sans perdre l’état en changeant d’onglet.
         </p>
       </header>
 
-      <nav
-        className="mb-6 flex flex-wrap gap-3"
-        aria-label="Navigation modules"
-      >
-        {navBtn('agent', 'Console agent')}
+      <nav className="mb-6 flex flex-wrap gap-3" aria-label="Navigation modules">
+        {navBtn('agent', 'Console')}
+        {navBtn('results', 'Estimation')}
         {navBtn('profile', 'Profil')}
         {navBtn('status', 'Statut')}
       </nav>
@@ -96,13 +98,25 @@ export default function App() {
             id="agent-heading"
             className="mb-1 text-lg font-semibold text-sage-800"
           >
-            Console de contrôle
+            Console de peaufinage
           </h2>
           <p className="mb-5 text-sm text-muted">
-            Gemini Function Calling · outil <code>generate_menu</code> · logs en
-            direct.
+            Générez et ajustez le menu. Validez uniquement quand vous êtes
+            satisfait.
           </p>
           <AgentConsole />
+        </section>
+      )}
+
+      {section === 'results' && (
+        <section
+          aria-labelledby="results-heading"
+          className="rounded-2xl border border-sage-100 bg-white/80 p-5 shadow-sm backdrop-blur-sm"
+        >
+          <h2 id="results-heading" className="sr-only">
+            Estimation et courses
+          </h2>
+          <EstimationView />
         </section>
       )}
 
@@ -118,7 +132,7 @@ export default function App() {
             Profil & préférences
           </h2>
           <p className="mb-5 text-sm text-muted">
-            Nombre de personnes, budget hebdomadaire et régimes alimentaires.
+            Foyer, budget, jours de recettes (max. 14) et régimes.
           </p>
           <ProfileForm />
         </section>
@@ -132,26 +146,17 @@ export default function App() {
           <h2 className="mb-3 text-lg font-semibold text-sage-800">
             Statut backend
           </h2>
-
           {state.status === 'loading' && (
             <p className="text-muted">
               Vérification de <code className="text-sage-800">/health</code>…
             </p>
           )}
-
           {state.status === 'error' && (
             <div className="space-y-2 text-sm">
               <p className="font-medium text-red-700">API injoignable</p>
               <p className="text-muted">{state.message}</p>
-              <p className="text-muted">
-                Lancez le backend :{' '}
-                <code className="rounded bg-sage-50 px-1.5 py-0.5 text-sage-800">
-                  uvicorn app.main:app --reload --port 8000
-                </code>
-              </p>
             </div>
           )}
-
           {state.status === 'ok' && (
             <div className="space-y-4">
               <p className="text-sm text-muted">
@@ -181,5 +186,13 @@ export default function App() {
         </section>
       )}
     </div>
+  )
+}
+
+export default function App() {
+  return (
+    <AgentWorkspaceProvider>
+      <AppShell />
+    </AgentWorkspaceProvider>
   )
 }
