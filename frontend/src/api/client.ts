@@ -131,9 +131,16 @@ export async function deleteHistorySession(runId: string): Promise<void> {
 }
 
 export async function validateMenuSession(runId: string): Promise<AgentSession> {
-  const response = await fetch(`${API_BASE}/agent/runs/${runId}/validate`, {
+  // Primary: explicit run id
+  let response = await fetch(`${API_BASE}/agent/runs/${encodeURIComponent(runId)}/validate`, {
     method: 'POST',
   })
+  // Fallback when proxy hits a stale backend (route 404) or id drift after F5
+  if (response.status === 404) {
+    response = await fetch(`${API_BASE}/agent/sessions/latest/validate`, {
+      method: 'POST',
+    })
+  }
   if (!response.ok) throw new Error(await parseError(response))
   return response.json() as Promise<AgentSession>
 }

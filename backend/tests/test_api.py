@@ -122,6 +122,19 @@ def _run() -> None:
     assert body["id"] == "sess-validate-1"
     print("OK validate after cold memory")
 
+    # Reset flag and validate via /latest (F5-friendly path)
+    run_store.update_run("sess-validate-1", menu_validated=False)
+    with run_store._lock:  # noqa: SLF001
+        run_store._runs.clear()  # noqa: SLF001
+        run_store._latest_id = None  # noqa: SLF001
+    latest_validate = client.post("/agent/sessions/latest/validate")
+    assert latest_validate.status_code == 200, latest_validate.text
+    assert latest_validate.json()["menu_validated"] is True
+    # Dual mount /api prefix
+    api_prefixed = client.post("/api/agent/sessions/latest/validate")
+    assert api_prefixed.status_code == 200, api_prefixed.text
+    print("OK validate via latest + /api prefix")
+
     profile = UserProfile(budget_eur=100, recipe_days=10)
     items = [ShoppingItem(name="Pain", quantity="1", aisle="Boulangerie")]
     _priced, report = price_shopping_list(items, profile)

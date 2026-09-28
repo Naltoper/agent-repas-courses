@@ -127,6 +127,22 @@ def get_latest_session() -> AgentSession:
     return session
 
 
+@router.post("/agent/sessions/latest/validate", response_model=AgentSession)
+def validate_latest_session() -> AgentSession:
+    """Validate the current latest session (survives F5 without relying on client run_id)."""
+    session = run_store.get_latest()
+    if session is None:
+        raise HTTPException(status_code=404, detail="Aucune session disponible")
+    if session.result is None:
+        raise HTTPException(status_code=400, detail="Aucun menu à valider")
+    run_store.load_into_memory(session)
+    updated = run_store.update_run(session.id, menu_validated=True)
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Run introuvable")
+    run_store.persist_latest(updated)
+    return updated
+
+
 @router.get("/agent/sessions", response_model=list[SessionSummary])
 def list_sessions() -> list[SessionSummary]:
     latest = run_store.get_latest()

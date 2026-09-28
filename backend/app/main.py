@@ -7,11 +7,17 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import router
 from app.core.config import reload_settings
+from app.storage import run_store
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     settings = reload_settings()
+    # Hydrate latest session so validate/shopping work after process restart / F5
+    latest = run_store.get_latest()
+    if latest is not None:
+        run_store.load_into_memory(latest)
+        print(f"[smartchef] restored session {latest.id} ({latest.status})")
     print(
         f"[smartchef] env={settings.app_env} "
         f"gemini={'ready' if settings.has_gemini else 'missing'} "
@@ -35,7 +41,9 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    # Root paths (Vite strips /api) + /api prefix for direct VITE_API_URL=*/api clients
     application.include_router(router)
+    application.include_router(router, prefix="/api")
     return application
 
 

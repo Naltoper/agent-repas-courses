@@ -1,55 +1,47 @@
-# Bilan — SmartChef Agent (validate 404, budget période, historique CRUD)
+# Bilan — SmartChef Agent (fix 404 Valider le menu)
 
 **Rôle :** Développeur senior  
 **Date :** 2026-09-29  
-**Périmètre :** Fix validation menu, budget global lié aux jours, rename/delete sessions — **sans** Keep / YouTube  
+**Périmètre :** Correction du 404 « Not Found » sur Valider le menu — **sans** Keep / YouTube  
 **Statut :** ✅ Livré (`npm run build` OK · `python -m tests.test_api` OK)
 
 ---
 
-## 1. Décisions
+## 1. Décisions / diagnostic
 
 | Sujet | Choix |
 |-------|--------|
-| 404 Valider | Cause : `update_run` ne voyait que la mémoire après F5 ; hydratation disque + `load_into_memory` avant validate |
-| Budget | `weekly_budget_eur` → `budget_eur` = enveloppe **globale** pour `recipe_days` (migration auto depuis l’ancien champ) |
-| Affichage | Estimation compare au budget période + libellé €/jour dérivé |
-| Historique | `PATCH /agent/sessions/{id}` (rename) · `DELETE /agent/sessions/{id}` |
-| Tests | Smoke API autonome (`backend/tests/test_api.py`) sans nouveau code Keep/YouTube |
+| Cause racine | Vite proxyait `/api` → **:8000** (processus uvicorn **obsolète**, sans route `/validate`). L’API à jour tournait sur **:8081**. FastAPI répondait `{"detail":"Not Found"}` (route absente), pas « Run introuvable ». |
+| Client | `POST /api/agent/runs/{session.id}/validate` (+ fallback `POST .../sessions/latest/validate`) |
+| Backend | Routes présentes : `/agent/runs/{run_id}/validate` et `/agent/sessions/latest/validate` (+ miroir sous `/api`) |
+| Proxy | `VITE_API_PROXY_TARGET` configurable ; `.env.development` → `:8000` (API relancée à jour) |
+| Persistance F5 | `get_latest()` hydrate la mémoire ; lifespan restaure la dernière session au boot |
 
 ---
 
 ## 2. Fichiers touchés
 
-### Backend
-- `app/storage/run_store.py` — hydrate `update_run`, rename, delete
-- `app/api/routes.py` — validate robuste, rename/delete sessions
-- `app/models/schemas.py` — `budget_eur`, `BudgetReport` période, `SessionRenameRequest`
-- `app/core/pricing.py` — budget période / €·jour
-- `app/core/config.py` — `reload_settings` n’écrase plus les env déjà posées
-- `app/agent/orchestrator.py` / `tools.py` — consignes & payload budget
-- `tests/test_api.py` — **nouveau** smoke validate / budget / CRUD
-
-### Frontend
-- `api/client.ts` — rename/delete
-- `components/HistoryView.tsx` — UI renommer / supprimer
-- `components/ProfileForm.tsx` / `MenuDisplays.tsx` / `types/domain.ts` — budget période
-- `.gitignore` — ignore `_test_data_run/`
+- `frontend/vite.config.ts` — proxy via `VITE_API_PROXY_TARGET`
+- `frontend/.env.development` / `.env.example` — cible proxy documentée
+- `frontend/src/api/client.ts` — fallback validate `latest`
+- `backend/app/main.py` — hydrate au boot + mount `/api`
+- `backend/app/api/routes.py` — `POST /agent/sessions/latest/validate`
+- `backend/app/storage/run_store.py` — hydrate `get_latest`, globals corrigés
+- `backend/tests/test_api.py` — smoke cold memory + latest + `/api`
 
 ---
 
 ## 3. Risques restants
 
-- Anciens profils JSON encore en `weekly_budget_eur` : migrés à la lecture ; à resauvegarder pour normaliser le fichier.
-- Renommer la session active déclenche un `resumeSession` (recharge complète) — acceptable, pas de race critique.
-- Pas de confirmation custom (dialog navigateur) pour la suppression.
+- Un second uvicorn obsolète sur un autre port peut encore 404 si le proxy pointe dessus → **redémarrer Vite** après changement de `.env.development`.
+- Deux mounts (`/` et `/api`) dupliquent les operation_id OpenAPI (sans impact runtime).
 
 ---
 
 ## 4. Prochaine étape proposée
 
-**P4** — embeds YouTube optionnels **ou** export Keep, une fois le parcours validation / budget / historique stable en prod.
+Stabiliser un seul port API (script `make dev` / doc README) pour éviter les dérives 8000 vs 8081, puis P4 YouTube/Keep si besoin.
 
 ---
 
-*Fin du bilan — validate / budget période / historique CRUD.*
+*Fin du bilan — 404 validate / proxy.*

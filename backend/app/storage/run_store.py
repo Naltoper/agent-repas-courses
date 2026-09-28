@@ -136,6 +136,7 @@ def get_run(run_id: str) -> AgentSession | None:
 
 
 def get_latest() -> AgentSession | None:
+    global _latest_id
     with _lock:
         if _latest_id and _latest_id in _runs:
             return _runs[_latest_id].model_copy(deep=True)
@@ -145,7 +146,12 @@ def get_latest() -> AgentSession | None:
     raw = path.read_text(encoding="utf-8").strip()
     if not raw:
         return None
-    return AgentSession.model_validate_json(raw)
+    session = AgentSession.model_validate_json(raw)
+    # Keep memory aligned with disk so subsequent PATCH/validate succeed
+    with _lock:
+        _runs[session.id] = session
+        _latest_id = session.id
+    return session.model_copy(deep=True)
 
 
 def list_summaries() -> list[SessionSummary]:
@@ -176,6 +182,7 @@ def append_log(
 
 def update_run(run_id: str, **fields: object) -> AgentSession | None:
     """Update a run, hydrating from disk when the process no longer has it in memory."""
+    global _latest_id
     with _lock:
         session = _runs.get(run_id)
     if session is None:
@@ -187,7 +194,6 @@ def update_run(run_id: str, **fields: object) -> AgentSession | None:
             # Another writer may have won; prefer in-memory if present
             if run_id not in _runs:
                 _runs[run_id] = session
-                global _latest_id
                 if _latest_id is None:
                     _latest_id = run_id
 
@@ -253,6 +259,7 @@ def delete_session(run_id: str) -> bool:
 
 
 def persist_latest(session: AgentSession) -> None:
+    global _latest_id
     stamped = session.model_copy(
         update={
             "updated_at": session.updated_at or _now_iso(),
@@ -274,13 +281,12 @@ def persist_latest(session: AgentSession) -> None:
     _upsert_index(stamped)
     with _lock:
         _runs[stamped.id] = stamped
-        global _latest_id
         _latest_id = stamped.id
 
 
 def load_into_memory(session: AgentSession) -> AgentSession:
+    global _latest_id
     with _lock:
-        global _latest_id
         _runs[session.id] = session
         _latest_id = session.id
     return session
