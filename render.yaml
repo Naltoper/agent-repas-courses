@@ -1,0 +1,28 @@
+# Render Blueprint — SmartChef API (FastAPI)
+# https://render.com/docs/blueprint-spec
+#
+# After first deploy: set GEMINI_API_KEY + FRONTEND_ORIGIN in the Render dashboard
+# (FRONTEND_ORIGIN = your Vercel URL, e.g. https://smartchef.vercel.app)
+
+services:
+  - type: web
+    name: smartchef-api
+    runtime: python
+    plan: free
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: PYTHON_VERSION
+        value: "3.12.8"
+      - key: DATA_DIR
+        value: /tmp/smartchef-data
+      - key: GEMINI_MODEL
+        value: gemini-3.5-flash-lite
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: FRONTEND_ORIGIN
+        sync: false
