@@ -23,16 +23,31 @@ import {
 import type {
   AgentLogEvent,
   AgentSession,
-  AppSection,
+  AppView,
   ChatMessage,
-  ResultsSubView,
+  Step1Tab,
+  TunnelStep,
 } from '../types/domain'
+import {
+  loadInStockIds,
+  loadUiPrefs,
+  saveInStockIds,
+  saveUiPrefs,
+  type UiPrefs,
+} from '../utils/uiPrefs'
 
 interface AgentWorkspaceValue {
-  section: AppSection
-  setSection: (section: AppSection) => void
-  resultsView: ResultsSubView
-  setResultsView: (view: ResultsSubView) => void
+  appView: AppView
+  setAppView: (view: AppView) => void
+  tunnelStep: TunnelStep
+  setTunnelStep: (step: TunnelStep) => void
+  maxReachedStep: TunnelStep
+  step1Tab: Step1Tab
+  setStep1Tab: (tab: Step1Tab) => void
+  uiPrefs: UiPrefs
+  setUiPrefs: (prefs: UiPrefs) => void
+  inStockIds: Set<string>
+  toggleInStock: (itemId: string) => void
   prompt: string
   setPrompt: (value: string) => void
   session: AgentSession | null
@@ -45,6 +60,8 @@ interface AgentWorkspaceValue {
   startRun: (prompt: string) => Promise<void>
   sendFollowUp: (message: string) => Promise<void>
   validateMenu: () => Promise<void>
+  goToStep: (step: TunnelStep) => void
+  goToStoreMode: () => void
   editMenu: () => void
   toggleShoppingItem: (itemId: string, checked: boolean) => Promise<void>
   resetChecks: () => Promise<void>
@@ -56,8 +73,11 @@ interface AgentWorkspaceValue {
 const AgentWorkspaceContext = createContext<AgentWorkspaceValue | null>(null)
 
 export function AgentWorkspaceProvider({ children }: { children: ReactNode }) {
-  const [section, setSection] = useState<AppSection>('agent')
-  const [resultsView, setResultsView] = useState<ResultsSubView>('estimation')
+  const [appView, setAppView] = useState<AppView>('tunnel')
+  const [tunnelStep, setTunnelStep] = useState<TunnelStep>(1)
+  const [step1Tab, setStep1Tab] = useState<Step1Tab>('recipes')
+  const [uiPrefs, setUiPrefsState] = useState<UiPrefs>(() => loadUiPrefs())
+  const [inStockIds, setInStockIds] = useState<Set<string>>(() => new Set())
   const [prompt, setPrompt] = useState(
     'Menu équilibré, plats simples et rapides le soir.',
   )
@@ -70,6 +90,11 @@ export function AgentWorkspaceProvider({ children }: { children: ReactNode }) {
   const [restoring, setRestoring] = useState(true)
   const esRef = useRef<EventSource | null>(null)
 
+  const setUiPrefs = useCallback((prefs: UiPrefs) => {
+    setUiPrefsState(prefs)
+    saveUiPrefs(prefs)
+  }, [])
+
   const applySession = useCallback((next: AgentSession) => {
     setSession(next)
     setLogs(next.logs ?? [])
@@ -81,6 +106,7 @@ export function AgentWorkspaceProvider({ children }: { children: ReactNode }) {
     if (next.status === 'completed' || next.status === 'failed') {
       setRunning(false)
     }
+    setInStockIds(loadInStockIds(next.id))
   }, [])
 
   const watchRun = useCallback(
@@ -170,7 +196,14 @@ export function AgentWorkspaceProvider({ children }: { children: ReactNode }) {
     const controller = new AbortController()
     fetchLatestSession(controller.signal)
       .then((latest) => {
-        if (latest) applySession(latest)
+        if (latest) {
+          applySession(latest)
+          if (latest.menu_validated && latest.result) {
+            setTunnelStep(2)
+          } else {
+            setTunnelStep(1)
+          }
+        }
       })
       .catch(() => undefined)
       .finally(() => setRestoring(false))
@@ -194,7 +227,9 @@ export function AgentWorkspaceProvider({ children }: { children: ReactNode }) {
       setMessages([])
       setSession(null)
       setMenuValidated(false)
-      setResultsView('estimation')
+      setTunnelStep(1)
+      setStep1Tab('recipes')
+      setInStockIds(new Set())
       try {
         const started = await startAgentRun(trimmed)
         applySession(started)
@@ -216,6 +251,7 @@ export function AgentWorkspaceProvider({ children }: { children: ReactNode }) {
       setError(null)
       setRunning(true)
       setMenuValidated(false)
+      setTunnelStep(1)
       try {
         await sendAgentFollowUp(session.id, trimmed)
         setRunning(true)
@@ -235,22 +271,65 @@ export function AgentWorkspaceProvider({ children }: { children: ReactNode }) {
       const updated = await validateMenuSession(session.id)
       applySession(updated)
       setMenuValidated(true)
-      setResultsView('estimation')
-      setSection('results')
+      setTunnelStep(2)
+      setAppView('tunnel')
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Validation impossible')
     }
   }, [applySession, session?.id, session?.result])
 
+  const maxReachedStep: TunnelStep = useMemo(() => {
+    if (!session?.result) return 1
+    if (!menuValidated) return 1
+    if (tunnelStep >= 3) return 3
+    return 2
+  }, [session?.result, menuValidated, tunnelStep])
+
+  const goToStep = useCallback(
+    (step: TunnelStep) => {
+      if (step === 1) {
+        setTunnelStep(1)
+        return
+      }
+      if (step === 2 && menuValidated && session?.result) {
+        setTunnelStep(2)
+        return
+      }
+      if (step === 3 && menuValidated && session?.result && maxReachedStep >= 3) {
+        setTunnelStep(3)
+      }
+    },
+    [menuValidated, session?.result, maxReachedStep],
+  )
+
+  const goToStoreMode = useCallback(() => {
+    if (!menuValidated || !session?.result) return
+    setTunnelStep(3)
+    setAppView('tunnel')
+  }, [menuValidated, session?.result])
+
   const editMenu = useCallback(() => {
     setMenuValidated(false)
-    setSection('agent')
+    setTunnelStep(1)
+    setAppView('tunnel')
   }, [])
+
+  const toggleInStock = useCallback(
+    (itemId: string) => {
+      setInStockIds((prev) => {
+        const next = new Set(prev)
+        if (next.has(itemId)) next.delete(itemId)
+        else next.add(itemId)
+        saveInStockIds(session?.id ?? null, next)
+        return next
+      })
+    },
+    [session?.id],
+  )
 
   const toggleShoppingItem = useCallback(
     async (itemId: string, checked: boolean) => {
       if (!session?.id || !session.result) return
-      // Optimistic UI
       setSession((prev) => {
         if (!prev?.result) return prev
         const shopping_list = prev.result.shopping_list.map((item) =>
@@ -300,8 +379,10 @@ export function AgentWorkspaceProvider({ children }: { children: ReactNode }) {
     setMenuValidated(false)
     setRunning(false)
     setError(null)
-    setResultsView('estimation')
-    setSection('agent')
+    setTunnelStep(1)
+    setStep1Tab('recipes')
+    setInStockIds(new Set())
+    setAppView('tunnel')
     setPrompt('Menu équilibré, plats simples et rapides le soir.')
   }, [])
 
@@ -312,11 +393,11 @@ export function AgentWorkspaceProvider({ children }: { children: ReactNode }) {
       try {
         const loaded = await loadHistorySession(runId)
         applySession(loaded)
-        setResultsView('estimation')
+        setAppView('tunnel')
         if (loaded.menu_validated && loaded.result) {
-          setSection('results')
+          setTunnelStep(2)
         } else {
-          setSection('agent')
+          setTunnelStep(1)
         }
       } catch (err: unknown) {
         setError(err instanceof Error ? err.message : 'Reprise impossible')
@@ -329,10 +410,17 @@ export function AgentWorkspaceProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<AgentWorkspaceValue>(
     () => ({
-      section,
-      setSection,
-      resultsView,
-      setResultsView,
+      appView,
+      setAppView,
+      tunnelStep,
+      setTunnelStep,
+      maxReachedStep,
+      step1Tab,
+      setStep1Tab,
+      uiPrefs,
+      setUiPrefs,
+      inStockIds,
+      toggleInStock,
       prompt,
       setPrompt,
       session,
@@ -345,6 +433,8 @@ export function AgentWorkspaceProvider({ children }: { children: ReactNode }) {
       startRun,
       sendFollowUp,
       validateMenu,
+      goToStep,
+      goToStoreMode,
       editMenu,
       toggleShoppingItem,
       resetChecks,
@@ -353,8 +443,14 @@ export function AgentWorkspaceProvider({ children }: { children: ReactNode }) {
       clearError: () => setError(null),
     }),
     [
-      section,
-      resultsView,
+      appView,
+      tunnelStep,
+      maxReachedStep,
+      step1Tab,
+      uiPrefs,
+      setUiPrefs,
+      inStockIds,
+      toggleInStock,
       prompt,
       session,
       logs,
@@ -366,6 +462,8 @@ export function AgentWorkspaceProvider({ children }: { children: ReactNode }) {
       startRun,
       sendFollowUp,
       validateMenu,
+      goToStep,
+      goToStoreMode,
       editMenu,
       toggleShoppingItem,
       resetChecks,

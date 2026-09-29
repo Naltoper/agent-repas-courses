@@ -14,6 +14,22 @@ export type AppSection = 'agent' | 'results' | 'history' | 'profile' | 'status'
 
 export type ResultsSubView = 'estimation' | 'shopping'
 
+/** Primary navigation for the UX tunnel refactor */
+export type AppView = 'tunnel' | 'history' | 'settings'
+
+export type TunnelStep = 1 | 2 | 3
+
+export type Step1Tab = 'recipes' | 'chat'
+
+export type StoreBrand =
+  | 'lidl'
+  | 'leclerc'
+  | 'carrefour'
+  | 'intermarche'
+  | 'auchan'
+  | 'monoprix'
+  | 'autre'
+
 export interface IntegrationStatus {
   gemini: boolean
   youtube: boolean
