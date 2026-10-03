@@ -231,7 +231,7 @@ export function SettingsScreen() {
           Intelligence artificielle
         </legend>
         <p className="text-sm text-muted">
-          La clé Gemini est configurée côté serveur (Northflank). Statut :{' '}
+          La clé Gemini est configurée côté serveur (Render). Statut :{' '}
           <span className="font-medium text-sage-800">
             {health?.integrations.gemini ? 'prête' : 'non configurée / offline'}
           </span>

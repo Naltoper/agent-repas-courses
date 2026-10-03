@@ -1,28 +1,49 @@
-# Bilan — Préparation déploiement Vercel + Northflank (+ Postgres)
+# Bilan — Stack Vercel + Render + cron-job.org (+ Neon pour persistance)
 
 **Rôle :** Développeur senior  
 **Date :** 2026-10-03  
-**Périmètre :** Remplacer Render ; API always-on Northflank ; BDD Postgres Sandbox  
-**Statut :** ✅ Config + persistance Postgres optionnelle dans le repo · déploiement à faire par l’utilisateur
+**Périmètre :** Abandon Northflank (CB) ; stack 100 % gratuite sans CB  
+**Statut :** ✅ `/health` + CORS OK · docs à jour · `npm run build` OK
 
 ---
 
-## 1. Décision BDD
+## 1. Infrastructure validée
 
-**Postgres addon Northflank** (pas Supabase) : inclus dans le Sandbox gratuit (1× DB), always-on, pas de pause à 7 jours.
+| Couche | Choix |
+|--------|--------|
+| UI | Vercel (existant) |
+| API | Render Free (conservé) |
+| Anti cold-start | **cron-job.org** → `GET /health` toutes les **10 min** |
+| Persistance durable | **Neon Free** recommandé (optionnel via `DATABASE_URL`) — pas Render Postgres Free (expire 30 j) |
 
----
-
-## 2. Fichiers
-
-- `backend/Dockerfile`, `backend/.dockerignore`
-- `backend/app/storage/db.py` + branchements `run_store` / `profile_store`
-- `psycopg[binary]` dans `requirements.txt`
-- `DEPLOY.md` réécrit (étapes Render → Northflank → Vercel)
-- `render.yaml` marqué deprecated
+Northflank : abandonné.
 
 ---
 
-## 3. Actions utilisateur
+## 2. Vérifs code
 
-Voir **`DEPLOY.md`** : supprimer Render → créer addon Postgres + service API → `VITE_API_URL` + `vercel --prod`.
+- `GET /health` → `status: "ok"`, public, sans auth (`routes.py`) — OK cron-job.org  
+- CORS : `FRONTEND_ORIGIN` + regex `https://.*\.vercel\.app` (`main.py`)  
+- `render.yaml` réactivé + `DATABASE_URL` optionnel  
+- `DEPLOY.md` réécrit pour cette stack
+
+---
+
+## 3. Analyse persistance (synthèse)
+
+- **Fichiers `/tmp`** : perdus au redeploy — insuffisant pour l’historique.  
+- **Supabase Free** : viable en JSONB, mais **pause projet ~7 j** sans activité → moins bon que Neon pour « toujours là ».  
+- **Render Postgres Free** : expire **30 jours** puis données supprimées → déconseillé.  
+- **Neon Free** : sans CB, données conservées, scale-to-zero ~5 min (réveil court à la requête) — **meilleur fit** ; brancher avec `DATABASE_URL` (code `db.py` / `psycopg` déjà prêt).  
+- Preférer `psycopg` + URI plutôt que `supabase-py` pour ce backend.
+
+---
+
+## 4. Actions utilisateur
+
+1. Garder / redéployer Render  
+2. Créer cron cron-job.org → `/health` / 10 min  
+3. (Plus tard) Neon + `DATABASE_URL` pour historique durable  
+4. `VITE_API_URL` Vercel = URL Render si besoin + `vercel --prod`
+
+Détail : **`DEPLOY.md`**.

@@ -1,10 +1,15 @@
-# Déploiement SmartChef — Vercel (UI) + Northflank (API + Postgres)
-#
-# Choix BDD : **Postgres addon Northflank** (inclus dans le Sandbox gratuit :
-# 1× database, always-on, pas de pause après 7 jours comme Supabase Free).
-# Supabase n’est **pas** utilisé dans ce guide.
+# Déploiement SmartChef — Vercel (UI) + Render (API) + cron-job.org
 
-Usage cible : 1 personne, quelques fois / semaine, mobile. Sans cold start Render.
+Stack **100 % gratuite**, sans carte bancaire. Usage perso / mobile.
+
+| Couche | Plateforme | Rôle |
+|--------|------------|------|
+| Frontend | Vercel | React / Vite (déjà déployé) |
+| Backend | Render Free | FastAPI |
+| Anti cold-start | [cron-job.org](https://cron-job.org) | `GET /health` toutes les **10 min** |
+| Persistance (optionnel) | **Neon Free** recommandé | Postgres via `DATABASE_URL` (voir § Persistance) |
+
+> Northflank abandonné (exigence CB). Ne pas utiliser pour ce projet.
 
 ---
 
@@ -12,135 +17,117 @@ Usage cible : 1 personne, quelques fois / semaine, mobile. Sans cold start Rende
 
 | Fichier | Rôle |
 |---------|------|
-| `backend/Dockerfile` | Image API pour Northflank |
-| `backend/app/storage/db.py` | Persistance Postgres (historique + profil) |
-| `frontend/vercel.json` | Build Vite + SPA (déjà déployé) |
-| `render.yaml` | **Obsolète** — à ne plus utiliser |
+| `render.yaml` | Blueprint API FastAPI |
+| `backend/Dockerfile` | Option Docker sur Render |
+| `frontend/vercel.json` | Build Vite + SPA |
+| CORS | `FRONTEND_ORIGIN` + regex `https://.*\.vercel\.app` |
+| `GET /health` | Public, sans auth — OK pour cron-job.org |
+| `backend/app/storage/db.py` | Postgres optionnel si `DATABASE_URL` est défini |
 
-Variables API : `GEMINI_API_KEY`, `FRONTEND_ORIGIN`, `DATABASE_URL` (ou `POSTGRES_URI`), `APP_ENV=production`.
-
-En local sans Postgres : fichiers JSON dans `DATA_DIR` (comportement inchangé).
-
----
-
-## A. Retirer Render
-
-1. Ouvre [https://dashboard.render.com](https://dashboard.render.com).
-2. Service `smartchef-api` (ou équivalent) → **Settings** → **Delete Web Service**.
-3. Si un Blueprint était lié au repo, tu peux le laisser ou le supprimer — le fichier `render.yaml` du repo n’est plus la cible de déploiement.
-
-Rien à faire côté code pour « déconnecter » Render : dès que Vercel pointe vers Northflank, Render n’est plus appelé.
+Sans `DATABASE_URL` : fichiers sous `DATA_DIR` (**éphémère** sur Render Free → historique perdu au redeploy / redémarrage).
 
 ---
 
-## B. Northflank — Postgres puis API
+## A. Render — API
 
-### B1. Compte & projet
-
-1. [https://app.northflank.com](https://app.northflank.com) → créer un compte (plan **Sandbox**).
-2. **Create project** → ex. `smartchef`.
-3. Relie GitHub et autorise le repo `agent-repas-courses`.
-
-### B2. Addon PostgreSQL (gratuit Sandbox)
-
-1. **Create new** → **Addon** → **PostgreSQL**.
-2. Nom : `smartchef-db`.
-3. Garde la plus petite taille / plan Sandbox.
-4. TLS recommandé ; **pas besoin** d’accès public si l’API est dans le même projet.
-5. Crée l’addon → attends qu’il soit **Running**.
-6. Onglet **Connection details** / secrets : note `POSTGRES_URI` (ou équivalent).
-
-### B3. Service API (combined / deployment)
-
-1. **Create new** → **Combined service** (build + deploy) ou **Deployment** depuis Git.
-2. Repo : `agent-repas-courses`.
-3. **Build context / root directory** : `backend` (important).
-4. Build : **Dockerfile** → chemin `Dockerfile` (dans `backend/`).
-5. Port : `8000` (ou celui injecté via `PORT` — le `CMD` lit `$PORT`).
-6. Health check path : `/health`.
-7. **Runtime / secrets** (lier aussi les secrets de l’addon Postgres) :
+1. [https://dashboard.render.com](https://dashboard.render.com) → connecte GitHub.
+2. **New** → **Blueprint** (détecte `render.yaml`) **ou** Web Service, **Root Directory** = `backend`.
+3. Plan **Free**.
+4. Environment :
 
 | Variable | Valeur |
 |----------|--------|
+| `GEMINI_API_KEY` | clé Google AI |
+| `FRONTEND_ORIGIN` | `https://TON-APP.vercel.app` |
 | `APP_ENV` | `production` |
-| `GEMINI_API_KEY` | ta clé Google AI |
-| `GEMINI_MODEL` | `gemini-3.5-flash-lite` |
-| `FRONTEND_ORIGIN` | URL Vercel exacte, ex. `https://xxx.vercel.app` |
-| `DATABASE_URL` | valeur de `POSTGRES_URI` de l’addon (souvent via « link secret group ») |
+| `DATA_DIR` | `/tmp/smartchef-data` (défaut blueprint) |
+| `DATABASE_URL` | *(optionnel)* URI Neon — voir § Persistance |
 
-8. Deploy → copie l’URL HTTPS du service, ex. `https://smartchef-api-xxxx.northflank.app`.
-9. Test : ouvre `https://…/health` → JSON `status: ok`.
-
-> Le schéma SQL (`smartchef_sessions`, `smartchef_profile`) est créé **au démarrage** de l’API.
+5. Deploy → URL du type `https://smartchef-api-xxxx.onrender.com`
+6. Vérifie : `https://…onrender.com/health` → `"status": "ok"`.
 
 ---
 
-## C. Vercel — pointer le front vers Northflank
+## B. cron-job.org — garder l’API éveillée
 
-Le front est déjà sur Vercel. Il faut seulement changer l’URL API puis rebuild.
+1. Compte gratuit sur [https://cron-job.org](https://cron-job.org) (pas de CB).
+2. **Create cronjob** :
+   - URL : `https://smartchef-api-xxxx.onrender.com/health`
+   - Schedule : toutes les **10 minutes**
+   - Method : `GET`
+   - Notifications : optionnel
+3. Active le job. Les pings empêchent le sleep Render (~15 min d’inactivité).
 
-### Via dashboard (recommandé)
+> Si le cron s’arrête, le cold start (~30–60 s) revient. Vérifie de temps en temps l’historique d’exécution sur cron-job.org.
 
-1. [https://vercel.com](https://vercel.com) → projet frontend.
-2. **Settings** → **Environment Variables** → `VITE_API_URL`  
-   = `https://TON-SERVICE.northflank.app`  
-   (**sans** `/` final, **sans** `/api` — sauf si tu as volontairement monté l’API sous `/api` ; l’app accepte les deux).
-3. **Deployments** → **Redeploy** (cocher rebuild sans cache si dispo).
+---
 
-### Via CLI
+## C. Vercel — frontend
+
+Déjà en place. Si l’URL API change :
 
 ```bash
 cd ~/Desktop/Projets/agent-repas-courses/frontend
 vercel env add VITE_API_URL production
-# colle l’URL Northflank quand demandé
+# colle https://smartchef-api-xxxx.onrender.com  (sans / final)
 
 vercel --prod
 ```
 
-Si les variables sont déjà à jour :
+Ou dashboard Vercel → Environment Variables → `VITE_API_URL` → **Redeploy**.
 
-```bash
-cd ~/Desktop/Projets/agent-repas-courses/frontend
-vercel --prod
+---
+
+## D. Persistance de l’historique (recommandation)
+
+### Verdict
+
+| Option | Gratuit sans CB ? | Durable long terme ? | Verdict |
+|--------|-------------------|----------------------|---------|
+| Fichiers `/tmp` Render | Oui | Non (effacé redeploy / restart) | Insuffisant |
+| Render Postgres Free | Oui | **Non** (expire **30 jours** puis suppression) | À éviter |
+| Supabase Free | Oui | Fragile (pause projet ~**7 j** sans activité) | OK seulement + cron DB |
+| **Neon Free** | Oui | Oui (données gardées ; compute sleep 5 min → réveil ~ms) | **Recommandé** |
+| Upstash / Vercel KV | Oui (limites) | Oui pour cache, moins naturel pour gros JSON sessions | Secondaire |
+
+**Recommandation :** **Neon Free** + variable `DATABASE_URL` sur Render.  
+Le backend branche déjà Postgres (`psycopg`) quand `DATABASE_URL` est défini — pas besoin de `supabase-py` pour ce flux.
+
+### Pourquoi pas Supabase en premier ?
+
+- Avantages : UI agréable, Auth/Storage si besoin plus tard, JSONB OK.
+- Inconvénients : pause projet après ~7 jours d’inactivité (pire qu’un sleep DB de quelques centaines de ms). Il faudrait un second cron qui touche la DB. Neon scale-to-zero se réveille automatiquement à la prochaine requête API.
+
+### Brancher Neon (quand tu veux l’historique durable)
+
+1. [https://neon.tech](https://neon.tech) → projet Free (sans CB).
+2. Copie la connection string (URI Postgres).
+3. Render → Environment → `DATABASE_URL` = cette URI.
+4. Redeploy API. Au boot : tables `smartchef_sessions` / `smartchef_profile` créées automatiquement.
+
+Schéma (déjà créé par le code) :
+
+```sql
+-- smartchef_sessions : id, payload JSONB, summary JSONB, updated_at, is_latest
+-- smartchef_profile  : id=1, payload JSONB
 ```
 
 ---
 
-## D. Checklist de validation
-
-1. `https://API-NORTHFLANK/health` → ok + `integrations.gemini` si clé OK.  
-2. Front Vercel → générer un menu → Valider → Historique.  
-3. Redéploie ou redémarre l’API Northflank → l’historique doit **encore** être là (Postgres).  
-4. Plus de délai de 1–2 min au premier appel (pas de sleep Render).
-
----
-
-## E. Push du code (si tu n’as pas encore poussé)
+## E. Push
 
 ```bash
 cd ~/Desktop/Projets/agent-repas-courses
 git push origin main
 ```
 
-Northflank redéploiera si le service est branché sur `main`.
-
 ---
 
-## Dépannage
+## Checklist
 
 | Symptôme | Action |
 |----------|--------|
-| CORS | `FRONTEND_ORIGIN` = URL Vercel exacte + regex `*.vercel.app` déjà dans le code |
-| `Unexpected token '<'` | `VITE_API_URL` faux ou deploy Vercel sans rebuild |
-| Erreur Postgres au boot | Secret `DATABASE_URL` / `POSTGRES_URI` manquant ou addon pas prêt |
-| Gemini échoue | Clé + quotas Google AI Studio |
-| Build Docker échoue | Root directory = `backend`, pas la racine du monorepo |
-
----
-
-## Pourquoi pas Supabase ici ?
-
-- Supabase **Free** pause après ~7 jours d’inactivité → même classe de problème que « pas toujours accessible ».
-- Northflank Sandbox inclut **1× database** always-on, dans le même projet que l’API → un seul panneau, historique durable sans pause hebdo.
-
-Si un jour tu quittes le Sandbox Northflank, tu pourras migrer les tables JSONB vers Supabase Pro ou un autre Postgres.
+| Cold start 1–2 min | Vérifier cron-job.org toutes les 10 min sur `/health` |
+| CORS | `FRONTEND_ORIGIN` = URL Vercel + regex `*.vercel.app` déjà dans le code |
+| Historique perdu | Ajouter Neon + `DATABASE_URL` |
+| Gemini échoue | Clé + quotas Google AI |
