@@ -1,5 +1,6 @@
 import { useAgentWorkspace } from '../../state/AgentWorkspaceContext'
 import { Step1ChatTab } from './Step1ChatTab'
+import { Step1ExecutionLogs } from './Step1ExecutionLogs'
 import { Step1PrefsPanel } from './Step1PrefsPanel'
 import { Step1RecipesTab } from './Step1RecipesTab'
 
@@ -38,6 +39,8 @@ export function Step1Planning() {
       </div>
 
       {step1Tab === 'recipes' ? <Step1RecipesTab /> : <Step1ChatTab />}
+
+      <Step1ExecutionLogs />
     </div>
   )
 }

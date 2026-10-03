@@ -1,43 +1,37 @@
-# Bilan — Refonte UX tunnel 3 étapes (front-only)
+# Bilan — Correctifs logs Step1 + inputs numériques
 
 **Rôle :** Développeur senior  
-**Date :** 2026-09-29  
-**Périmètre :** Parcours Recettes → Courses → En Magasin + Historique + Paramètres  
-**Statut :** ✅ Build `npm run build` OK · API / Gemini / stack inchangés
+**Date :** 2026-10-03  
+**Périmètre :** UI Step1 (logs live) + Settings (saisie numérique) — API / stack inchangés  
+**Statut :** ✅ `npm run build` OK
 
 ---
 
-## 1. Décisions
+## 1. Changements
 
-| Sujet | Choix |
+| Sujet | Détail |
 |-------|--------|
-| Nav | Bas mobile : Planifier / Historique / Paramètres |
-| Tunnel | Stepper 1→2→3 ; avance 2 si menu validé ; 3 via Mode Magasin |
-| Magasin / ville | `localStorage` (`uiPrefs`) + coeff. affichage budget UI |
-| Stock | `inStockIds` session (localStorage lié à `session.id`) |
-| Remplacer recette | `sendFollowUp` (API existante) |
-| Déprécié | Ancienne console dense, Estimation/Shopping standalone |
+| Logs Step1 | Accordion `Step1ExecutionLogs` : statut session, modèle Gemini (extrait des logs / profil), flux SSE `logs` en mono scrollable |
+| Settings numériques | Drafts `string` pour jours / personnes / budget ; parse + clamp au `onBlur` et à la sauvegarde (`numberDraft.ts`) |
+| Prefs Step1 | Inchangé (chips jours + ± convives, pas d’input texte numérique) |
 
 ---
 
-## 2. Fichiers clés
+## 2. Fichiers
 
-- `App.tsx` + `AppShell` + `TunnelScreen`
-- `components/tunnel/Step1*` / `Step2Basket` / `Step3StoreMode` / `StepStepper`
-- `HistoryScreen` / `SettingsScreen`
-- `AgentWorkspaceContext` (`appView`, `tunnelStep`, `inStockIds`, `uiPrefs`)
-- Utils : `storePricing.ts`, `shareList.ts`, `uiPrefs.ts`
+- `frontend/src/components/tunnel/Step1ExecutionLogs.tsx` (nouveau)
+- `frontend/src/components/tunnel/Step1Planning.tsx`
+- `frontend/src/components/SettingsScreen.tsx`
+- `frontend/src/utils/numberDraft.ts` (nouveau)
 
 ---
 
-## 3. Hors scope (CDC)
+## 3. Note infra (Vercel + Supabase)
 
-- Clé IA client / fallback offline  
-- Prix enseigne réels (coeff. UI seulement)  
-- Difficulté plats (affichage `prep_time` + régimes seulement)
+Faisable en migration progressive : front Vercel inchangé ; FastAPI en serverless Vercel nécessite adaptation (pas uvicorn long-running / SSE fragile) ; persistance JSON fichier → Postgres Supabase (sessions JSONB). Garder Render pour l’API agent tant que les runs longs + EventSource restent critiques.
 
 ---
 
 ## 4. Prochaine étape
 
-Parcours manuel mobile : prefs → générer → chat → valider → stock → mode magasin → historique reprendre ; redeploy Vercel si besoin.
+Test manuel logs pendant génération ; redeploy Vercel si besoin.

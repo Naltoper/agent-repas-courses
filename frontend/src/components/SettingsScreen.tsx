@@ -2,8 +2,14 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { fetchHealth, fetchProfile, saveProfile } from '../api/client'
 import { useAgentWorkspace } from '../state/AgentWorkspaceContext'
 import type { DietaryRegime, HealthResponse, UserProfile } from '../types/domain'
-import { STORE_OPTIONS } from '../utils/storePricing'
 import type { StoreBrand } from '../types/domain'
+import {
+  clampFloat,
+  clampInt,
+  draftDecimal,
+  draftDigits,
+} from '../utils/numberDraft'
+import { STORE_OPTIONS } from '../utils/storePricing'
 
 const EMPTY: UserProfile = {
   household_size: 2,
@@ -27,26 +33,53 @@ const REGIMES: { value: DietaryRegime; label: string }[] = [
 export function SettingsScreen() {
   const { uiPrefs, setUiPrefs } = useAgentWorkspace()
   const [profile, setProfile] = useState<UserProfile>(EMPTY)
+  const [daysDraft, setDaysDraft] = useState(String(EMPTY.recipe_days))
+  const [peopleDraft, setPeopleDraft] = useState(String(EMPTY.household_size))
+  const [budgetDraft, setBudgetDraft] = useState(String(EMPTY.budget_eur))
   const [health, setHealth] = useState<HealthResponse | null>(null)
   const [msg, setMsg] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     const c = new AbortController()
-    void fetchProfile(c.signal).then((p) => setProfile({ ...EMPTY, ...p }))
+    void fetchProfile(c.signal).then((p) => {
+      const next = { ...EMPTY, ...p }
+      setProfile(next)
+      setDaysDraft(String(next.recipe_days))
+      setPeopleDraft(String(next.household_size))
+      setBudgetDraft(String(next.budget_eur))
+    })
     void fetchHealth(c.signal)
       .then(setHealth)
       .catch(() => setHealth(null))
     return () => c.abort()
   }, [])
 
+  function commitNumericFields(base: UserProfile = profile): UserProfile {
+    const next: UserProfile = {
+      ...base,
+      recipe_days: clampInt(daysDraft, 1, 14, base.recipe_days || 5),
+      household_size: clampInt(peopleDraft, 1, 12, base.household_size || 2),
+      budget_eur: clampFloat(budgetDraft, 0, 10_000, base.budget_eur || 0),
+    }
+    setProfile(next)
+    setDaysDraft(String(next.recipe_days))
+    setPeopleDraft(String(next.household_size))
+    setBudgetDraft(String(next.budget_eur))
+    return next
+  }
+
   async function onSave(e: FormEvent) {
     e.preventDefault()
     setSaving(true)
     setMsg(null)
     try {
-      const saved = await saveProfile(profile)
+      const toSave = commitNumericFields()
+      const saved = await saveProfile(toSave)
       setProfile(saved)
+      setDaysDraft(String(saved.recipe_days))
+      setPeopleDraft(String(saved.household_size))
+      setBudgetDraft(String(saved.budget_eur))
       setMsg('Préférences enregistrées')
     } catch (err: unknown) {
       setMsg(err instanceof Error ? err.message : 'Erreur de sauvegarde')
@@ -106,38 +139,37 @@ export function SettingsScreen() {
           <label className="block text-xs text-muted">
             Jours
             <input
-              type="number"
-              min={1}
-              max={14}
-              value={profile.recipe_days}
-              onChange={(e) =>
-                setProfile((p) => ({
-                  ...p,
-                  recipe_days: Math.min(
-                    14,
-                    Math.max(1, Number(e.target.value) || 1),
-                  ),
-                }))
-              }
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              value={daysDraft}
+              onChange={(e) => setDaysDraft(draftDigits(e.target.value))}
+              onBlur={() => {
+                const n = clampInt(daysDraft, 1, 14, profile.recipe_days || 5)
+                setProfile((p) => ({ ...p, recipe_days: n }))
+                setDaysDraft(String(n))
+              }}
               className="mt-1 min-h-11 w-full rounded-xl border border-sage-100 px-3 text-sm"
             />
           </label>
           <label className="block text-xs text-muted">
             Personnes
             <input
-              type="number"
-              min={1}
-              max={12}
-              value={profile.household_size}
-              onChange={(e) =>
-                setProfile((p) => ({
-                  ...p,
-                  household_size: Math.min(
-                    12,
-                    Math.max(1, Number(e.target.value) || 1),
-                  ),
-                }))
-              }
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              value={peopleDraft}
+              onChange={(e) => setPeopleDraft(draftDigits(e.target.value))}
+              onBlur={() => {
+                const n = clampInt(
+                  peopleDraft,
+                  1,
+                  12,
+                  profile.household_size || 2,
+                )
+                setProfile((p) => ({ ...p, household_size: n }))
+                setPeopleDraft(String(n))
+              }}
               className="mt-1 min-h-11 w-full rounded-xl border border-sage-100 px-3 text-sm"
             />
           </label>
@@ -145,15 +177,20 @@ export function SettingsScreen() {
         <label className="block text-xs text-muted">
           Budget période (€)
           <input
-            type="number"
-            min={0}
-            value={profile.budget_eur}
-            onChange={(e) =>
-              setProfile((p) => ({
-                ...p,
-                budget_eur: Number(e.target.value) || 0,
-              }))
-            }
+            type="text"
+            inputMode="decimal"
+            value={budgetDraft}
+            onChange={(e) => setBudgetDraft(draftDecimal(e.target.value))}
+            onBlur={() => {
+              const n = clampFloat(
+                budgetDraft,
+                0,
+                10_000,
+                profile.budget_eur || 0,
+              )
+              setProfile((p) => ({ ...p, budget_eur: n }))
+              setBudgetDraft(String(n))
+            }}
             className="mt-1 min-h-11 w-full rounded-xl border border-sage-100 px-3 text-sm"
           />
         </label>
