@@ -1,4 +1,4 @@
-"""JSON persistence for the single-user profile."""
+"""JSON persistence for the single-user profile (files or Postgres)."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ from pathlib import Path
 
 from app.core.config import get_settings
 from app.models.schemas import UserProfile
+from app.storage import db
 
 PROFILE_FILENAME = "profile.json"
 
@@ -23,6 +24,11 @@ def profile_path() -> Path:
 
 
 def load_profile() -> UserProfile:
+    if db.enabled():
+        payload = db.load_profile_payload()
+        if payload is None:
+            return UserProfile()
+        return UserProfile.model_validate(payload)
     path = profile_path()
     if not path.exists():
         return UserProfile()
@@ -33,8 +39,11 @@ def load_profile() -> UserProfile:
 
 
 def save_profile(profile: UserProfile) -> UserProfile:
-    path = profile_path()
     payload = profile.model_dump(mode="json")
+    if db.enabled():
+        db.save_profile_payload(payload)
+        return profile
+    path = profile_path()
     path.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",

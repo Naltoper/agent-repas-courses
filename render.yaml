@@ -1,8 +1,8 @@
+# DEPRECATED — SmartChef API is deployed on Northflank (see DEPLOY.md).
+# Kept only for reference; do not create new Render services from this file.
+#
 # Render Blueprint — SmartChef API (FastAPI)
 # https://render.com/docs/blueprint-spec
-#
-# After first deploy: set GEMINI_API_KEY + FRONTEND_ORIGIN in the Render dashboard
-# (FRONTEND_ORIGIN = your Vercel URL, e.g. https://smartchef.vercel.app)
 
 services:
   - type: web

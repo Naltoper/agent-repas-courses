@@ -39,6 +39,8 @@ class Settings(BaseSettings):
     google_keep_master_token: str = ""
 
     data_dir: str = "data"
+    # Northflank Postgres addon: set DATABASE_URL or POSTGRES_URI
+    database_url: str = ""
     agent_max_tool_rounds: int = 6
 
     @property

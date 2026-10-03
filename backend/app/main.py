@@ -7,12 +7,17 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import router
 from app.core.config import reload_settings
-from app.storage import run_store
+from app.storage import db, run_store
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     settings = reload_settings()
+    if db.enabled():
+        db.ensure_schema()
+        print("[smartchef] persistence=postgres")
+    else:
+        print(f"[smartchef] persistence=files dir={settings.resolved_data_dir}")
     # Hydrate latest session so validate/shopping work after process restart / F5
     latest = run_store.get_latest()
     if latest is not None:

@@ -1,37 +1,28 @@
-# Bilan — Correctifs logs Step1 + inputs numériques
+# Bilan — Préparation déploiement Vercel + Northflank (+ Postgres)
 
 **Rôle :** Développeur senior  
 **Date :** 2026-10-03  
-**Périmètre :** UI Step1 (logs live) + Settings (saisie numérique) — API / stack inchangés  
-**Statut :** ✅ `npm run build` OK
+**Périmètre :** Remplacer Render ; API always-on Northflank ; BDD Postgres Sandbox  
+**Statut :** ✅ Config + persistance Postgres optionnelle dans le repo · déploiement à faire par l’utilisateur
 
 ---
 
-## 1. Changements
+## 1. Décision BDD
 
-| Sujet | Détail |
-|-------|--------|
-| Logs Step1 | Accordion `Step1ExecutionLogs` : statut session, modèle Gemini (extrait des logs / profil), flux SSE `logs` en mono scrollable |
-| Settings numériques | Drafts `string` pour jours / personnes / budget ; parse + clamp au `onBlur` et à la sauvegarde (`numberDraft.ts`) |
-| Prefs Step1 | Inchangé (chips jours + ± convives, pas d’input texte numérique) |
+**Postgres addon Northflank** (pas Supabase) : inclus dans le Sandbox gratuit (1× DB), always-on, pas de pause à 7 jours.
 
 ---
 
 ## 2. Fichiers
 
-- `frontend/src/components/tunnel/Step1ExecutionLogs.tsx` (nouveau)
-- `frontend/src/components/tunnel/Step1Planning.tsx`
-- `frontend/src/components/SettingsScreen.tsx`
-- `frontend/src/utils/numberDraft.ts` (nouveau)
+- `backend/Dockerfile`, `backend/.dockerignore`
+- `backend/app/storage/db.py` + branchements `run_store` / `profile_store`
+- `psycopg[binary]` dans `requirements.txt`
+- `DEPLOY.md` réécrit (étapes Render → Northflank → Vercel)
+- `render.yaml` marqué deprecated
 
 ---
 
-## 3. Note infra (Vercel + Supabase)
+## 3. Actions utilisateur
 
-Faisable en migration progressive : front Vercel inchangé ; FastAPI en serverless Vercel nécessite adaptation (pas uvicorn long-running / SSE fragile) ; persistance JSON fichier → Postgres Supabase (sessions JSONB). Garder Render pour l’API agent tant que les runs longs + EventSource restent critiques.
-
----
-
-## 4. Prochaine étape
-
-Test manuel logs pendant génération ; redeploy Vercel si besoin.
+Voir **`DEPLOY.md`** : supprimer Render → créer addon Postgres + service API → `VITE_API_URL` + `vercel --prod`.

@@ -14,6 +14,7 @@ from app.models.schemas import (
     SessionSummary,
     ShoppingItem,
 )
+from app.storage import db
 
 _lock = threading.Lock()
 _runs: dict[str, AgentSession] = {}
@@ -74,6 +75,8 @@ def _to_summary(session: AgentSession) -> SessionSummary:
 
 
 def _write_index(summaries: list[SessionSummary]) -> None:
+    if db.enabled():
+        return
     path = _index_path()
     path.write_text(
         json.dumps(
@@ -87,6 +90,11 @@ def _write_index(summaries: list[SessionSummary]) -> None:
 
 
 def _read_index() -> list[SessionSummary]:
+    if db.enabled():
+        return [
+            SessionSummary.model_validate(item)
+            for item in db.list_summary_payloads(50)
+        ]
     path = _index_path()
     if not path.exists():
         return []
@@ -124,6 +132,11 @@ def get_run(run_id: str) -> AgentSession | None:
         session = _runs.get(run_id)
         if session is not None:
             return session.model_copy(deep=True)
+    if db.enabled():
+        payload = db.get_session_payload(run_id)
+        if payload is None:
+            return None
+        return AgentSession.model_validate(payload)
     path = _history_dir() / f"{run_id}.json"
     if path.exists():
         return AgentSession.model_validate_json(path.read_text(encoding="utf-8"))
@@ -140,6 +153,15 @@ def get_latest() -> AgentSession | None:
     with _lock:
         if _latest_id and _latest_id in _runs:
             return _runs[_latest_id].model_copy(deep=True)
+    if db.enabled():
+        payload = db.get_latest_payload()
+        if payload is None:
+            return None
+        session = AgentSession.model_validate(payload)
+        with _lock:
+            _runs[session.id] = session
+            _latest_id = session.id
+        return session.model_copy(deep=True)
     path = _data_dir() / SESSION_FILENAME
     if not path.exists():
         return None
@@ -225,10 +247,8 @@ def rename_session(run_id: str, title: str) -> AgentSession | None:
 
 
 def delete_session(run_id: str) -> bool:
-    """Remove a session from history, disk, and memory. Returns False if unknown."""
+    """Remove a session from history, disk/DB, and memory. Returns False if unknown."""
     global _latest_id
-    path = _history_dir() / f"{run_id}.json"
-    existed = path.exists()
     with _lock:
         in_memory = run_id in _runs
         if in_memory:
@@ -236,6 +256,12 @@ def delete_session(run_id: str) -> bool:
         if _latest_id == run_id:
             _latest_id = None
 
+    if db.enabled():
+        existed = db.delete_session_row(run_id)
+        return existed or in_memory
+
+    path = _history_dir() / f"{run_id}.json"
+    existed = path.exists()
     if path.exists():
         path.unlink()
 
@@ -266,6 +292,19 @@ def persist_latest(session: AgentSession) -> None:
             "title": _session_title(session),
         }
     )
+    if db.enabled():
+        summary = _to_summary(stamped)
+        db.upsert_session(
+            stamped.id,
+            stamped.model_dump(mode="json"),
+            summary.model_dump(mode="json"),
+            mark_latest=True,
+        )
+        with _lock:
+            _runs[stamped.id] = stamped
+            _latest_id = stamped.id
+        return
+
     latest_path = _data_dir() / SESSION_FILENAME
     latest_path.write_text(
         json.dumps(stamped.model_dump(mode="json"), ensure_ascii=False, indent=2)
@@ -332,9 +371,12 @@ def reset_shopping_checks(run_id: str) -> AgentSession | None:
 def clear_workspace() -> None:
     """Drop in-memory runs and the latest_session pointer (history kept)."""
     global _latest_id
-    latest_path = _data_dir() / SESSION_FILENAME
-    if latest_path.exists():
-        latest_path.unlink()
+    if db.enabled():
+        db.clear_latest_flag()
+    else:
+        latest_path = _data_dir() / SESSION_FILENAME
+        if latest_path.exists():
+            latest_path.unlink()
     with _lock:
         _runs.clear()
         _latest_id = None
